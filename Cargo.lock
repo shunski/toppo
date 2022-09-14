@@ -95,6 +95,7 @@ dependencies = [
 name = "top_spaces"
 version = "0.1.0"
 dependencies = [
+ "algebra",
  "util",
 ]
 
