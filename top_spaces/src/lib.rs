@@ -1,7 +1,10 @@
-// use alg_structure::Field;
+use algebra::commutative::PID;
+use algebra::module::matrix::Matrix;
 
-trait Space {
-    fn H(&self) -> Vec<usize>;
+pub trait Space<Coeff: PID + std::fmt::Debug> {
+    type Output;
+    fn homology(&self, _: Coeff) -> Self::Output;
+    fn get_boundary_map (&self) -> Vec<Matrix<Coeff>>;
 }
 
-mod complex;
+pub mod complex;
