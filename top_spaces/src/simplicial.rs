@@ -23,7 +23,7 @@ pub struct Simplex <T: VertexLabel>
 #[allow(unused)]
 impl<T: VertexLabel> Simplex<T> 
 {
-    pub fn new_from(labels: Vec<T>) -> Simplex<T> {
+    pub fn from(labels: Vec<T>) -> Simplex<T> {
         Simplex{
             dim: labels.len() - 1,
             vertices_labels: Vec::from_iter(labels.into_iter()),
@@ -31,6 +31,18 @@ impl<T: VertexLabel> Simplex<T>
     }
 }
 
+#[macro_export]
+macro_rules! simplex {
+    ( $( $vertex:expr ), * ) => {
+        {
+            let mut v = Vec::new();
+            $(
+                v.push($vertex.to_string());
+            )*
+            Simplex::from(v)
+        }
+    };
+}
 
 #[allow(unused)]
 #[derive(Clone, Debug, Eq)] 
@@ -93,8 +105,10 @@ impl SimplicialCell {
             
         if cell.vertices.len() > self.vertices.len() { 
             (self.vertices.len()..cell.vertices.len()).
-            for_each(|i| self.vertices.push(cell.vertices[i]));
+                for_each(|i| self.vertices.push(cell.vertices[i]));
         }
+
+        self.dim = SimplicialCell::dim(&self.vertices);
     }
 
     fn intersection(&mut self, cell: &SimplicialCell) -> SimplicialCell {
@@ -342,19 +356,19 @@ impl<T: VertexLabel> SimplicialCplx<T>
     }
 
     pub fn is_connected(&self) -> bool {
-        // if the complex is empty, then it is vacuously connected.
-        if self.maximal_cells.is_empty() {
-            return true;
-        }
-
-        // Otherwise, we take the naive approach to detect connectedness
-        let mut join = self.maximal_cells[0].clone();
+        let join = self.maximal_cells.first();
+        let mut join = match join {
+            Some(x) => x.clone(),
+            None => return true,
+            // if the complex is empty, then it is vacuously connected.
+        };
         let mut prev_dim = join.dim;
         loop {
             // iterate each cell and join it if connected.
             let cells_connected_to_join: Vec<_> = self.maximal_cells.iter()
                 .filter(|&cell| cell.is_connected_with(&join))
                 .collect();
+            println!("cells_connected_to_join.len(): {}", cells_connected_to_join.len());
             cells_connected_to_join.iter().for_each(|cell| { join.join(cell); });
 
             // if the join eventually gets the join of all points, then the complex is connected
@@ -392,44 +406,57 @@ impl<T: VertexLabel> SimplicialCplx<T>
     }
 }
 
+#[macro_export]
+macro_rules! simplicial_cplx {
+    ( $( {$( $vertex:expr ), *}), * ) => {
+        {
+            let mut simplices = Vec::new();
+            $(
+                let mut vertices = Vec::new();
+                $(
+                    vertices.push($vertex.to_string());
+                )*
+                simplices.push( Simplex::from(vertices) );
+            )*
+            let mut cplx = SimplicialCplx::new();
+            simplices.into_iter().for_each(|simplex| cplx.attach(simplex));
+            cplx
+        }
+    };
+}
+
 
 #[cfg(test)]
 mod simplicial_cplx_tests {
     #[test]
     fn object_instantiation() {
-        use crate::complex::*;
+        use crate::simplicial::*;
 
-        let mut cplx = SimplicialCplx::new_from_zero_skeleton(vec!["v0".to_string(), "v1".to_string()]);
+        let mut cplx = SimplicialCplx::new();
+        cplx.attach( simplex!{"v0"} );
+        cplx.attach( simplex!{"v1"} );
         assert_eq!(cplx.is_connected(), false);
 
-        let mut labels = vec!["v1".to_string(), "v2".to_string(), "v3".to_string()];
-        let simplex = Simplex::new_from(labels.clone());
+        let simplex = simplex!{"v1", "v2", "v3"};
         assert_eq!(simplex.dim, 2);
 
-        cplx.attach(simplex.clone());
-        labels.push("v0".to_string());
+        cplx.attach(simplex);
+        let simplex = simplex!{"v0", "v1", "v2", "v3"};
         assert_eq!(
             cplx.get_labeled_zero_skeleton().len(), 
-            labels.len()
+            4
         );
 
-        cplx.attach(simplex.clone());
+        cplx.attach(simplex);
         assert_eq!(
             cplx.get_labeled_zero_skeleton().len(), 
-            labels.len()
+            4
         );
 
-        let mut labels = vec!["v0".to_string(), "v1".to_string()];
-        let simplex = Simplex::new_from(labels.clone());
-        let cplx = SimplicialCplx::new_from(simplex);
+        let simplex = simplex!{"v0", "v1"};
+        let mut cplx = SimplicialCplx::new_from(simplex);
         assert_eq!(cplx.dim(), 1);
-
-        labels.pop();
-        labels.push("v2".to_string());
-        labels.push("v3".to_string());
-        labels.push("v4".to_string());
-        let simplex = Simplex::new_from(labels.clone());
-        let cplx = SimplicialCplx::new_from(simplex);
+        cplx.attach(simplex!{ "v0", "v2", "v3", "v4" });
         assert_eq!(cplx.dim(), 3);
         assert_eq!(cplx.is_connected(), true);
     }
@@ -442,7 +469,7 @@ use algebra::module::matrix::Matrix;
 impl<T: VertexLabel, Coeff: Field + std::fmt::Debug + std::fmt::Display> Space<Coeff> for SimplicialCplx<T> 
 {
     type Output = Vec<usize>; 
-    fn homology(&self, _: Coeff ) -> Self::Output {
+    fn homology(&self) -> Self::Output {
         let boundary_maps: Vec<Matrix<Coeff>> = self.get_boundary_map();
         if boundary_maps.is_empty() { return Vec::new(); }
         let im_and_ker: Vec<_> = boundary_maps
@@ -509,63 +536,53 @@ impl<T: VertexLabel, Coeff: Field + std::fmt::Debug + std::fmt::Display> Space<C
 
 }#[cfg(test)]
 mod simpilicial_cplx_space_tests {
-    use crate::complex::*;
+    use crate::simplicial::*;
     use algebra::commutative::rational::*;
-    use algebra::commutative::Zero;
 
     #[test]
     fn homology_test() {
-        let mut circle = SimplicialCplx::new();
-        let edge1 = Simplex::new_from( vec!["v1".to_string(), "v2".to_string()] );
-        let edge2 = Simplex::new_from( vec!["v2".to_string(), "v3".to_string()] );
-        let edge3 = Simplex::new_from( vec!["v3".to_string(), "v1".to_string()] );
-        circle.attach(edge1.clone());
-        circle.attach(edge2.clone());
-        circle.attach(edge3.clone());
+        // testing with the circle (S^1)
+        let circle = simplicial_cplx!{
+            {"v1", "v2"},
+            {"v2", "v3"},
+            {"v3", "v1"}
+        };
+        assert_eq!( H!(circle; Rational), vec![1,1] );
 
-        let homology = circle.homology(Rational::zero());
-        assert_eq!(homology, vec![1,1]);
 
-        let mut sphere = SimplicialCplx::new();
-        let faces = 
-            vec![vec!["v0".to_string(), "v1".to_string(), "v2".to_string()],
-                 vec!["v0".to_string(), "v2".to_string(), "v3".to_string()],
-                 vec!["v0".to_string(), "v3".to_string(), "v4".to_string()],
-                 vec!["v0".to_string(), "v4".to_string(), "v1".to_string()],
-                 vec!["v5".to_string(), "v1".to_string(), "v2".to_string()],
-                 vec!["v5".to_string(), "v2".to_string(), "v3".to_string()],
-                 vec!["v5".to_string(), "v3".to_string(), "v4".to_string()],
-                 vec!["v5".to_string(), "v4".to_string(), "v1".to_string()]];
-        let faces: Vec<_> = faces.into_iter().map(|v| Simplex::new_from(v)).collect();
-        faces.iter().for_each(|face| sphere.attach(face.clone()));
+        // testing with the sphere (S^2)
+        let sphere = simplicial_cplx! {
+            {"v0", "v1", "v2"},
+            {"v0", "v2", "v3"},
+            {"v0", "v3", "v1"},
+            {"v4", "v1", "v2"},
+            {"v4", "v2", "v3"},
+            {"v4", "v3", "v1"}
+        };
+        assert_eq!( H!(sphere; Rational), vec![1,0,1] );
 
-        let homology = sphere.homology(Rational::zero());
-        assert_eq!(homology, vec![1,0,1]);
 
-        let mut torus = SimplicialCplx::new();
-        let faces = 
-            vec![vec!["v0".to_string(), "v1".to_string(), "v3".to_string()],
-                 vec!["v1".to_string(), "v3".to_string(), "v5".to_string()],
-                 vec!["v1".to_string(), "v2".to_string(), "v5".to_string()],
-                 vec!["v0".to_string(), "v2".to_string(), "v7".to_string()],
-                 vec!["v0".to_string(), "v3".to_string(), "v7".to_string()],
-                 vec!["v2".to_string(), "v5".to_string(), "v7".to_string()],
-                 vec!["v3".to_string(), "v4".to_string(), "v5".to_string()],
-                 vec!["v4".to_string(), "v5".to_string(), "v6".to_string()],
-                 vec!["v5".to_string(), "v6".to_string(), "v7".to_string()],
-                 vec!["v6".to_string(), "v7".to_string(), "v8".to_string()],
-                 vec!["v3".to_string(), "v7".to_string(), "v8".to_string()],
-                 vec!["v3".to_string(), "v4".to_string(), "v8".to_string()],
-                 vec!["v2".to_string(), "v4".to_string(), "v8".to_string()],
-                 vec!["v0".to_string(), "v2".to_string(), "v4".to_string()],
-                 vec!["v1".to_string(), "v2".to_string(), "v8".to_string()],
-                 vec!["v1".to_string(), "v6".to_string(), "v8".to_string()],
-                 vec!["v0".to_string(), "v1".to_string(), "v6".to_string()],
-                 vec!["v0".to_string(), "v4".to_string(), "v6".to_string()]];
-        let faces: Vec<_> = faces.into_iter().map(|v| Simplex::new_from(v)).collect();
-        faces.iter().for_each(|face| torus.attach(face.clone()));
-
-        let homology = torus.homology(Rational::zero());
-        assert_eq!(homology, vec![1,2,1]);
+        // testing with the torus
+        let torus = simplicial_cplx!{ 
+            {"v0", "v1", "v3"},
+            {"v1", "v3", "v5"},
+            {"v1", "v2", "v5"},
+            {"v0", "v2", "v7"},
+            {"v0", "v3", "v7"},
+            {"v2", "v5", "v7"},
+            {"v3", "v4", "v5"},
+            {"v4", "v5", "v6"},
+            {"v5", "v6", "v7"},
+            {"v6", "v7", "v8"},
+            {"v3", "v7", "v8"},
+            {"v3", "v4", "v8"},
+            {"v2", "v4", "v8"},
+            {"v0", "v2", "v4"},
+            {"v1", "v2", "v8"},
+            {"v1", "v6", "v8"},
+            {"v0", "v1", "v6"},
+            {"v0", "v4", "v6"}
+        };
+        assert_eq!(H!(torus; Rational), vec![1,2,1]);
     }
 }
