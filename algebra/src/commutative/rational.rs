@@ -50,6 +50,14 @@ impl Rational {
         self.sign = true;
         self
     }
+
+    pub fn get_numerator(&self) -> usize {
+        self.numerator as usize
+    }
+
+    pub fn get_denumerator(&self) -> usize {
+        self.denumerator as usize
+    }
 }
 
 impl Ord for Rational {
@@ -79,7 +87,7 @@ pub trait RationalFromInteger {
     fn over(&self, d: Self) -> Rational;
 }
 
-macro_rules! one_impl {
+macro_rules! rational_from_impl {
     ($($t:ty)*) => ($(
         impl RationalFromInteger for $t {
             #[inline]
@@ -96,7 +104,7 @@ macro_rules! one_impl {
     )*)
 }
 
-one_impl! { isize i8 i16 i32 i64 }
+rational_from_impl! { isize i8 i16 i32 i64 usize }
 
 
 impl Add for Rational {
