@@ -1,4 +1,4 @@
-use crate::commutative::{PID, Field};
+use crate::commutative::{PID, Field, bezout_identity};
 
 use std::alloc::{self, Layout};
 use std::marker::PhantomData;
@@ -36,6 +36,7 @@ impl<T: PID> Matrix<T> {
     }
 
     pub fn zero(n: usize, m: usize) -> Self {
+        if n==0 || m==0 { panic!("Any matrix must have positive dimension."); }
         let mut mat = Matrix {
             ptr: NonNull::dangling(),
             _marker: PhantomData,
@@ -86,7 +87,7 @@ impl<T: PID> Matrix<T> {
         unsafe { ptr::write(self.ptr().add(i*self.n_col + j), val); }
     }
 
-    fn get (&self, i: usize, j: usize) -> T {
+    pub fn get (&self, i: usize, j: usize) -> T {
         if i>=self.n_row || j>=self.n_col { 
             panic!("Idx out of bounds: index: ({}, {}) while (ros, col): ({}, {})", i, j, self.n_row, self.n_col); 
         }
@@ -122,6 +123,14 @@ impl<T: PID> Matrix<T> {
         self
     }
 
+    fn is_row_zero(&self, i: usize) -> bool {
+        self.row_iter(i).all(|&x| x == T::zero() )
+    }
+
+    fn is_col_zero(&self, j: usize) -> bool {
+        self.col_iter(j).all(|&x| x == T::zero() )
+    }
+
     fn row_operation(&mut self, row1:usize, s1: T, row2: usize, s2: T) {
         if row1 >= self.n_row || row2 >= self.n_row { panic!(); }
         let new_row = self.clone_row(row1).scalar_mul(s1) + self.clone_row(row2).scalar_mul(s2);
@@ -132,6 +141,18 @@ impl<T: PID> Matrix<T> {
         if col1 >= self.n_col || col2 >= self.n_col { panic!(); }
         let new_col = self.clone_col(col1).scalar_mul(s1) + self.clone_col(col2).scalar_mul(s2);
         self.write_col(col1, new_col);
+    }
+
+    fn swap_rows(&mut self, row1: usize, row2: usize) {
+        let tmp = self.clone_row(row1);
+        self.write_row(row1, self.clone_row(row2));
+        self.write_row(row2, tmp);
+    }
+
+    fn swap_cols(&mut self, col1: usize, col2: usize) {
+        let tmp = self.clone_col(col1);
+        self.write_col(col1, self.clone_row(col2));
+        self.write_col(col2, tmp);
     }
 
     fn ptr(&self) -> *mut T {
@@ -239,6 +260,113 @@ impl<T: PID> Clone for Matrix<T> {
     }
 }
 
+
+impl<T: PID> PartialEq for Matrix<T> {
+    fn eq(&self, rhs: &Self) -> bool {
+        if self.n_row != rhs.n_row || self.n_row != rhs.n_row {
+            return false;
+        }
+        self.iter().zip(rhs.iter()).all(|(&x, &y)| x == y)
+    }
+}
+
+impl<T: PID + std::fmt::Debug + std::fmt::Display> fmt::Debug for Matrix<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "\n")?;
+        for i in 0..self.n_row {
+            write!(f, "| ")?;
+            for (j, &x) in self.row_iter(i).enumerate() {
+                write!(f, "{}", x)?;
+                if j != self.n_col-1 {
+                    write!(f, "\t")?;
+                }
+            }
+            write!(f, " |\n")?;
+        }
+        write!(f, "")
+    }
+}
+
+
+#[macro_export]
+macro_rules! vector {
+    ( $scalar_type:ty, $( $scalar:expr ), * ) => {
+        {
+            let mut v = Vec::new();
+            $(
+                v.push($scalar);
+            )*
+            Matrix::from_vec(v)
+        }
+    };
+}
+
+
+#[macro_export]
+macro_rules! matrix {
+    ( integer; [$([$( $elem:expr ), *]), *]) => {
+        {
+            let mut v: Vec<Vec<i64>> = Vec::new();
+            $(
+                v.push(vec!($( $elem ), *));
+            )*
+            Matrix::<i64>::from_array(v)
+        }
+    };
+
+    ( rational; [$([$( $elem:expr ), *]), *]) => {
+        {
+            use crate::commutative::rational::Rational;
+            let mut v: Vec<Vec<Rational>> = Vec::new();
+            $(
+                v.push(vec!($( Rational::from($elem) ), *));
+            )*
+            Matrix::<Rational>::from_array(v)
+        }
+    };
+
+    ( [$([$( $elem:expr ), *]), *]) => {
+        {
+            let mut v: Vec<Vec<_>> = Vec::new();
+            $(
+                v.push(vec!($( $elem ), *));
+            )*
+            Matrix::from_array(v)
+        }
+    };
+}
+
+
+#[cfg(test)]
+mod init_test {
+    use crate::module::matrix::Matrix;
+    #[test]
+    fn init_test() {
+        let m1 = Matrix::<i64>::zero(5,4);
+        let m2 = matrix!(integer; 
+            [[0,0,0,0],
+             [0,0,0,0],
+             [0,0,0,0],
+             [0,0,0,0],
+             [0,0,0,0]]
+        );
+        assert_eq!(m1, m2);
+
+        let m1 = Matrix::<i64>::identity(5);
+        let m2 = matrix!(integer; 
+            [[1,0,0,0,0],
+             [0,1,0,0,0],
+             [0,0,1,0,0],
+             [0,0,0,1,0],
+             [0,0,0,0,1]]
+        );
+        assert_eq!(m1, m2);
+    }
+}
+
+
+
+
 impl<T: PID> IntoIterator for Matrix<T> {
     type Item = T;
     type IntoIter = MatIntoIter<T>;
@@ -338,31 +466,35 @@ impl<T: PID> Iterator for MatIntoIter<T> {
     }
 }
 
-impl<T: PID> PartialEq for Matrix<T> {
-    fn eq(&self, rhs: &Self) -> bool {
-        if self.n_row != rhs.n_row || self.n_row != rhs.n_row {
-            return false;
-        }
-        self.iter().zip(rhs.iter()).all(|(&x, &y)| x == y)
+
+#[cfg(test)]
+mod basic_functionality_test {
+    use crate::module::matrix::Matrix;
+    #[test] 
+    fn iter_test() {
+        let m1 = matrix!(integer;
+            [[1, 0, 1],
+             [2, 1, -1],
+             [2, -3, -1]]
+        );
+        let v: Vec<_> = m1.row_iter(1).map(|&x| x).collect();
+        assert_eq!(v, vec![2,1,-1]);
+
+        let v: Vec<_> = m1.col_iter(1).map(|&x| x).collect();
+        assert_eq!(v, vec![0,1,-3]);
+    }
+
+    #[test] 
+    fn ref_test() {
+        let mut m1 = matrix!(integer;
+            [[1, 0, 1],
+             [2, 1, -1],
+             [2, -3, -1]]
+        );
+        m1[1] = 3;
     }
 }
 
-impl<T: PID + std::fmt::Debug + std::fmt::Display> fmt::Debug for Matrix<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "\n")?;
-        for i in 0..self.n_row {
-            write!(f, "| ")?;
-            for (j, &x) in self.row_iter(i).enumerate() {
-                write!(f, "{}", x)?;
-                if j != self.n_col-1 {
-                    write!(f, "\t")?;
-                }
-            }
-            write!(f, " |\n")?;
-        }
-        write!(f, "")
-    }
-}
 
 impl<T: PID> Add for Matrix<T> 
 {
@@ -409,143 +541,10 @@ impl<T: PID> Mul for Matrix<T>
     }
 }
 
-// impl <T:PID> Matrix<T> {
-//     fn smith_normal_form(mut self) -> (Matrix<T>, Matrix<T>, Matrix<T>) {
-        
-//     }
-// }
-
-#[allow(unused)]
-impl <T:Field> Matrix<T> {
-    pub fn rank_as_linear_map(&self) -> usize {
-        let mut clone = self.clone();
-        let shorter_side = std::cmp::min(self.n_row, self.n_col);
-        let mut skipped = 0;
-        for k in 0..shorter_side {
-            if clone.get(k,k) == T::zero() {
-                let result = clone.row_iter(k).enumerate().skip(k+1).find(|(_, &x)| x != T::zero() );
-                match result {
-                    Some((j, _)) => clone.col_operation(k, T::one(), j, T::one()),
-                    None => (),
-                }
-            }
-            if clone.get(k,k) == T::zero() {
-                let result = clone.col_iter(k).enumerate().skip(k+1).find(|(_, &x)| x != T::zero() );
-                match result {
-                    Some((i, _)) => clone.row_operation(k, T::one(), i, T::one()),
-                    None => {
-                        skipped += 1;
-                        continue;
-                    },
-                }
-            }
-
-            // Now we have the nonzero element in (k, k)
-            let coeff = T::one() / clone.get(k,k);
-            clone.row_operation(k, coeff, k, T::zero());
-
-            for l in k+1..self.n_row {
-                let minus_one = T::zero() - T::one();
-                let a_lk = clone.get(l,k);
-                if a_lk == T::zero() { continue; } 
-                clone.row_operation(l, T::one(), k, minus_one * a_lk);
-            }
-        };
-
-        shorter_side - skipped
-    }
-}
-
-#[macro_export]
-macro_rules! vector {
-    ( $scalar_type:ty, $( $scalar:expr ), * ) => {
-        {
-            let mut v = Vec::new();
-            $(
-                v.push($scalar);
-            )*
-            Matrix::from_vec(v)
-        }
-    };
-}
-
-
-#[macro_export]
-macro_rules! matrix {
-    ( integer; [$([$( $elem:expr ), *]), *]) => {
-        {
-            let mut v: Vec<Vec<i64>> = Vec::new();
-            $(
-                v.push(vec!($( $elem ), *));
-            )*
-            Matrix::<i64>::from_array(v)
-        }
-    };
-
-    ( rational; [$([$( $elem:expr ), *]), *]) => {
-        {
-            use crate::commutative::rational::Rational;
-            let mut v: Vec<Vec<Rational>> = Vec::new();
-            $(
-                v.push(vec!($( Rational::from($elem) ), *));
-            )*
-            Matrix::<Rational>::from_array(v)
-        }
-    };
-
-    ( [$([$( $elem:expr ), *]), *]) => {
-        {
-            let mut v: Vec<Vec<_>> = Vec::new();
-            $(
-                v.push(vec!($( $elem ), *));
-            )*
-            Matrix::from_array(v)
-        }
-    };
-}
-
 
 #[cfg(test)]
-mod matrix_test {
+mod arithmetic_test {
     use crate::module::matrix::Matrix;
-    use crate::commutative::rational::*;
-    #[test]
-    fn init_test() {
-        let m1 = Matrix::<i64>::zero(5,4);
-        let m2 = matrix!(integer; 
-            [[0,0,0,0],
-             [0,0,0,0],
-             [0,0,0,0],
-             [0,0,0,0],
-             [0,0,0,0]]
-        );
-        assert_eq!(m1, m2);
-
-        let m1 = Matrix::<i64>::identity(5);
-        let m2 = matrix!(integer; 
-            [[1,0,0,0,0],
-             [0,1,0,0,0],
-             [0,0,1,0,0],
-             [0,0,0,1,0],
-             [0,0,0,0,1]]
-        );
-        assert_eq!(m1, m2);
-    }
-
-    #[test] 
-    fn iter_test() {
-        let m1 = matrix!(integer;
-            [[1, 0, 1],
-             [2, 1, -1],
-             [2, -3, -1]]
-        );
-        let v: Vec<_> = m1.row_iter(1).map(|&x| x).collect();
-        assert_eq!(v, vec![2,1,-1]);
-
-        let v: Vec<_> = m1.col_iter(1).map(|&x| x).collect();
-        assert_eq!(v, vec![0,1,-3]);
-    }
-
     #[test]
     fn addition_test() {
         let m1 = matrix!(integer;
@@ -610,7 +609,147 @@ mod matrix_test {
 
         assert_eq!(m1*m2, Matrix::identity(2));
     }
+}
 
+
+#[allow(unused)]
+impl <T:Field> Matrix<T> {
+    pub fn rank_as_linear_map(&self) -> usize {
+        let mut clone = self.clone();
+        let shorter_side = std::cmp::min(self.n_row, self.n_col);
+        let mut skipped = 0;
+        for k in 0..shorter_side {
+            if clone.get(k,k) == T::zero() {
+                let result = clone.row_iter(k).enumerate().skip(k+1).find(|(_, &x)| x != T::zero() );
+                match result {
+                    Some((j, _)) => clone.col_operation(k, T::one(), j, T::one()),
+                    None => (),
+                }
+            }
+            if clone.get(k,k) == T::zero() {
+                let result = clone.col_iter(k).enumerate().skip(k+1).find(|(_, &x)| x != T::zero() );
+                match result {
+                    Some((i, _)) => clone.row_operation(k, T::one(), i, T::one()),
+                    None => {
+                        skipped += 1;
+                        continue;
+                    },
+                }
+            }
+
+            // Now we have the nonzero element in (k, k)
+            let coeff = T::one() / clone.get(k,k);
+            clone.row_operation(k, coeff, k, T::zero());
+
+            for l in k+1..self.n_row {
+                let minus_one = T::zero() - T::one();
+                let a_lk = clone.get(l,k);
+                if a_lk == T::zero() { continue; } 
+                clone.row_operation(l, T::one(), k, minus_one * a_lk);
+            }
+        };
+
+        shorter_side - skipped
+    }
+}
+
+
+#[allow(unused)]
+impl <T: PID> Matrix<T> {
+    pub fn smith_normal_form(mut self) -> (Self, Self, Self) {
+        let mut r_op = Matrix::zero(self.n_row, self.n_row);
+        let mut c_op = Matrix::zero(self.n_col, self.n_col);
+
+        let mut pivot_idx = 0;
+
+        for i in 0..std::cmp::min(self.n_row, self.n_col) {
+            // choosing a pivot
+            if i != 0 { pivot_idx += 1; };
+            pivot_idx = (pivot_idx..).find(|&j| !self.is_col_zero(j)).unwrap();
+            if self.get(i, pivot_idx) != T::zero() {
+                let k = (i..).find(|&k| self.get(i, pivot_idx) != T::zero() ).unwrap();
+                self.swap_rows(i, k);
+            }
+
+            debug_assert!(self.get(i, pivot_idx)!=T::zero());
+
+            // Improving the pivot
+            while (i+1..self.n_row).any(|k| !self.get(i, pivot_idx).divides(self.get(k, pivot_idx))) || (pivot_idx+1..self.n_col).any(|l| !self.get(i, pivot_idx).divides(self.get(i, l))) {
+                for k in i+1..self.n_row {
+                    if !self.get(i, pivot_idx).divides(self.get(k, pivot_idx)) {
+                        let a = self.get(i, pivot_idx);
+                        let b = self.get(k, pivot_idx);
+                        let (gcd, x, y) = bezout_identity(a, b);
+
+                        // row operations
+                        let i_th_row = self.clone_row(i).scalar_mul(x) + self.clone_row(k).scalar_mul(y);
+                        let k_th_row = self.clone_row(i).scalar_mul(T::negative_one()* b.euclid_div(gcd).0) + self.clone_row(k).scalar_mul(a.euclid_div(gcd).0);
+
+                        self.write_row(i, i_th_row);
+                        self.write_row(k, k_th_row);
+
+                        debug_assert!(self.get(i, pivot_idx)==gcd);
+                    }
+                }
+
+                for l in pivot_idx+1..self.n_col {
+                    if !self.get(i, pivot_idx).divides(self.get(i, l)) {
+                        let a = self.get(i, pivot_idx);
+                        let b = self.get(i, l);
+                        let (gcd, x, y) = bezout_identity(a, b);
+
+                        // col operations
+                        let piv_th_col = self.clone_col(pivot_idx).scalar_mul(x) + self.clone_col(l).scalar_mul(y);
+                        let l_th_col = self.clone_col(pivot_idx).scalar_mul(T::negative_one()* b.euclid_div(gcd).0) + self.clone_col(l).scalar_mul(a.euclid_div(gcd).0);
+
+                        self.write_col(pivot_idx, piv_th_col);
+                        self.write_col(l, l_th_col);
+
+                        debug_assert!(self.get(i, pivot_idx)==gcd);
+                    }
+                }
+            }
+
+            // Eliminating entries
+            for k in i+1..self.n_row {
+                if self.get(k, pivot_idx) == T::zero() { continue; }
+
+                let ratio = self.get(k, pivot_idx).euclid_div(self.get(i, pivot_idx)).0;
+                self.row_operation(k, T::negative_one(), i, ratio);
+            }
+
+            for l in pivot_idx+1..self.n_col {
+                if self.get(i, l) == T::zero() { continue; }
+
+                let ratio = self.get(i, l).euclid_div(self.get(i, pivot_idx)).0;
+                self.col_operation(l, T::negative_one(), pivot_idx, ratio);
+            }
+
+            // Bringing all the pivots to the diagonal
+            for i in 0..std::cmp::min(self.n_row, self.n_col) {
+                if self.get(i,i) != T::zero() { continue; }
+                if (i+1..self.n_row).any(|j| self.get(i, j) == T::zero() ) { break; }
+                
+                let j = (i+1..).find(|&j| self.get(i, j) != T::zero() ).unwrap();
+                let val = self.get(i, j);
+                self.write(i, i, val);
+                self.write(i, j, T::zero());
+            }
+
+            // Finally, force this diagonal to satisfy a_{i, i} | a_{i+1, i+1} for each i
+
+        };
+
+        (r_op, self, c_op)
+    }
+}
+
+
+
+#[cfg(test)]
+mod operation_test {
+    use crate::module::matrix::Matrix;
+    use crate::commutative::rational::*;
     #[test]
     fn row_col_operation_test() {
         let mut m = matrix!(integer;
@@ -696,4 +835,15 @@ mod matrix_test {
         let r = m.rank_as_linear_map();
         assert_eq!(r, 1);
     }
+
+    // #[test]
+    // fn smith_normal_form_test() {
+    //     let m = matrix!(integer;
+    //         [[2, 4, 9],
+    //          [5, 7, 6],
+    //          [2, 4, 3]]
+    //     );
+    //     let (r, m, c) = m.smith_normal_form();
+    //     assert_eq!(r, m);
+    // }
 }

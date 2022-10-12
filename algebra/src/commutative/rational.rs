@@ -3,8 +3,11 @@ use std::ops::Sub;
 use std::ops::Mul;
 use std::ops::Div;
 use std::cmp::Ordering;
+use num::integer::gcd;
+
 use crate::commutative::Zero;
 use crate::commutative::One;
+use crate::commutative::NegativeOne;
 
 #[derive(PartialEq, Eq, Copy, Clone)]
 pub struct Rational {
@@ -32,7 +35,6 @@ impl Rational {
     }
 
     fn optimize(&mut self) {
-        use num::integer::gcd;
 
         if self.numerator == 0 {
             self.denumerator = 1;
@@ -62,8 +64,10 @@ impl Rational {
 
 impl Ord for Rational {
     fn cmp(&self, rhs: &Self) -> Ordering {
-        let a = self.numerator * rhs.denumerator;
-        let b = rhs.numerator * self.denumerator;
+        let gcd_of_n = gcd(self.numerator, rhs.numerator);
+        let gcd_of_d = gcd(self.denumerator, rhs.denumerator);
+        let a = (self.numerator/gcd_of_n) * (rhs.denumerator/gcd_of_d);
+        let b = (rhs.numerator/gcd_of_n) * (self.denumerator/gcd_of_d);
         if self.sign & rhs.sign { 
             a.cmp(&b) 
         } else if !self.sign & !rhs.sign {
@@ -113,19 +117,20 @@ impl Add for Rational {
     fn add(self, rhs: Self) -> Self::Output {
         let n: u64;
         let s: bool;
+        let gcd_of_d = gcd(self.denumerator, rhs.denumerator);
         if self.sign == rhs.sign {
-            n = (self.numerator * rhs.denumerator) + (self.denumerator * rhs.numerator);
+            n = (self.numerator * (rhs.denumerator/gcd_of_d)) + ((self.denumerator/gcd_of_d) * rhs.numerator);
             s = self.sign;
         } else if self.abs() >= rhs.abs() {
-            n = (self.numerator * rhs.denumerator) - (self.denumerator * rhs.numerator);
+            n = (self.numerator * (rhs.denumerator/gcd_of_d)) - ((self.denumerator/gcd_of_d) * rhs.numerator);
             s = self.sign;
         } else {
-            n = (self.denumerator * rhs.numerator) - (self.numerator * rhs.denumerator);
+            n = ((self.denumerator/gcd_of_d) * rhs.numerator) - (self.numerator * (rhs.denumerator/gcd_of_d));
             s = rhs.sign;
         }
         let mut r = Rational { 
             numerator: n, 
-            denumerator: self.denumerator * rhs.denumerator,
+            denumerator: self.denumerator * (rhs.denumerator/gcd_of_d),
             sign: s,
         };
         r.optimize();
@@ -179,6 +184,12 @@ impl Zero for Rational {
 impl One for Rational {
     fn one() -> Self {
         Rational::new(1, 1)
+    }
+}
+
+impl NegativeOne for Rational {
+    fn negative_one() -> Self {
+        Rational::new(-1, 1)
     }
 }
 
