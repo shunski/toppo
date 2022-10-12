@@ -14,7 +14,7 @@ pub mod bitwise {
 }
 
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq)]
 pub struct BinaryPool {
     len: usize,
     data: Vec<u64>
@@ -53,10 +53,12 @@ impl BinaryPool {
     }
 
     pub fn add(&mut self, index: usize) {
+        self.check_bounds(index);
         self.data[index/64] |= 1 << (index % 64);
     }
 
     pub fn subtract(&mut self, index: usize) {
+        self.check_bounds(index);
         self.data[index/64] &= !(1 << (index % 64));
     }
 
@@ -77,8 +79,13 @@ impl BinaryPool {
     }
 
     pub fn contains(&self, index: usize) -> bool {
+        self.check_bounds(index);
         self.data[index/64] & (1 << (index%64)) == 1 << (index%64)
     } 
+
+    fn check_bounds(&self, index: usize) {
+        if index >= self.len() { panic!("index out of bounds: len={} but index={}", self.len(), index); };
+    }
 
     pub fn is_subset_of(&self, other: &Self) -> bool {
         self.check_len(other);
@@ -89,6 +96,27 @@ impl BinaryPool {
         if self.len != other.len { panic!("two pools are not comparable. One has len {} but the other has len {}", self.len, other.len ) }
     }
 }
+
+use std::fmt;
+impl fmt::Debug for BinaryPool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "len = {}, ", self.len())?;
+        write!(f, "data = [")?;
+        for i in 0..self.len() {
+            if self.contains(i) {
+                write!(f, "1")?;
+            } else {
+                write!(f, "0")?;
+            }
+            if i!=self.len()-1 {
+                write!(f, ", ")?;
+            }
+        }
+        write!(f, "]")?;
+        write!(f, "")
+    }
+}
+
 
 #[cfg(test)]
 mod binary_pool_test {
@@ -139,7 +167,7 @@ mod binary_pool_test {
 }
 
 
-struct TupleIterator <'a, T: Copy> {
+pub struct TupleIterator <'a, T: Copy> {
     data: &'a[T],
     indeces: Vec<usize>,
     curr_idx: usize,
@@ -148,8 +176,6 @@ struct TupleIterator <'a, T: Copy> {
 
 impl<'a, T: Copy> TupleIterator<'a, T> {
     fn new(data: &'a[T], size: usize) -> TupleIterator<'a, T> {
-        if size == 0 {panic!("Tuple size cannot be zero");}
-
         let indeces = (0..size).collect();
 
         let is_done = data.len() < size;
@@ -213,7 +239,7 @@ impl<'a, T: Copy + std::fmt::Debug> Iterator for TupleIterator<'a, T> {
     }
 }
 
-trait TupleIterable <'a, T: Copy> {
+pub trait TupleIterable <'a, T: Copy> {
     fn tuple_iter(&'a self, size: usize) -> TupleIterator<'a, T>;
 }
 
@@ -251,9 +277,9 @@ mod tuple_iterator_test {
             assert_eq!(tuple_iter.next(), None);
         }
 
-        let v:Vec<usize> = vec![0; 30];
+        let v:Vec<usize> = vec![0; 20];
         let sum: usize = v.tuple_iter(10).map(|_| 1).sum();
-        assert_eq!(sum, choose(30, 10));
+        assert_eq!(sum, choose(20, 10));
     }
 
     fn factorial(n: usize) -> usize {

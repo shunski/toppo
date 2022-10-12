@@ -3,7 +3,7 @@ use util::bitwise::count_ones;
 use algebra::commutative::Field;
 
 pub trait VertexLabel: std::clone::Clone + std::cmp::Eq {}
-
+  
 macro_rules! vertex_label_impl {
     ($($t:ty)*) => ($(
         impl VertexLabel for $t {}
@@ -468,30 +468,6 @@ use algebra::module::matrix::Matrix;
 
 impl<T: VertexLabel, Coeff: Field + std::fmt::Debug + std::fmt::Display> Space<Coeff> for SimplicialCplx<T> 
 {
-    type Output = Vec<usize>; 
-    fn homology(&self) -> Self::Output {
-        let boundary_maps: Vec<Matrix<Coeff>> = self.get_boundary_map();
-        if boundary_maps.is_empty() { return Vec::new(); }
-        let im_and_ker: Vec<_> = boundary_maps
-            .into_iter()
-            .map(|boundary_map| {
-                let im: usize = boundary_map.rank_as_linear_map();
-                let ker: usize = boundary_map.size().1 - im;
-                (im, ker)
-            })
-            .collect();
-
-        let mut homology = Vec::new();
-        homology.reserve( self.dim()+1 );
-        let mut kernel = im_and_ker[0].1;
-        for &(im, ker) in im_and_ker.iter().skip(1) {
-            homology.push(kernel - im);
-            kernel = ker;
-        }
-        homology.push(im_and_ker.last().unwrap().1);
-        homology
-    }
-
     fn get_boundary_map(&self) -> Vec<Matrix<Coeff>> {
         let mut boundary_maps: Vec<Matrix<Coeff>> = Vec::new();
         if self.maximal_cells.is_empty() {
