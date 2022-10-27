@@ -49,6 +49,21 @@ macro_rules! negative_one_impl {
 
 negative_one_impl! { isize i8 i16 i32 i64 i128 f32 f64 }
 
+pub trait Symbol {
+    fn symbol()->String;
+}
+
+macro_rules! symbol_impl {
+    ($($t:ty)*) => ($(
+        impl Symbol for $t {
+            #[inline]
+            fn symbol() -> String { "Z".to_string() }
+        }
+    )*)
+}
+
+symbol_impl! { isize i8 i16 i32 i64 i128 f32 f64 }
+
 pub mod rational;
 pub trait PID: 
     Zero + One + NegativeOne
@@ -57,10 +72,12 @@ pub trait PID:
     + Eq + Sized + Copy 
     + std::fmt::Debug
     + std::fmt::Display
+    + Symbol
 {
     fn is_prime(self) -> bool;
     fn n_prime_factors(self) -> usize;
     fn euclid_div(self, d: Self) -> (Self, Self);
+    fn is_nonnegative(self) -> bool;
     fn divides(self, n: Self) -> bool {
         n.euclid_div(self).1 == Self::zero()
     }
@@ -90,6 +107,10 @@ macro_rules! pid_impl {
             fn euclid_div(self, d: Self) -> (Self, Self) {
                 (self/d, self%d)
             }
+
+            fn is_nonnegative(self) -> bool {
+                self >= 0
+            }
         }
     )*)
 }
@@ -102,6 +123,7 @@ macro_rules! pid_impl_for_fields {
             fn is_prime(self) -> bool { true }
             fn n_prime_factors(self) -> usize { 1 }
             fn euclid_div(self, d: Self) -> (Self, Self) { (self/d, Self::zero()) }
+            fn is_nonnegative(self) -> bool { self >= Self::zero() }
         }
     )*)
 }
@@ -154,15 +176,14 @@ mod pid_test {
     fn divides() {
         assert!(1.divides(0));
         assert!(1.divides(1));
+        assert!(1.divides(-1));
+        assert!((-1).divides(1));
+        assert!((-1).divides(-1));
         assert!(1.divides(2));
         assert!(3.divides(27));
         assert!(!27.divides(3));
         assert!(!2.divides(5));
     }
-}
-
-pub struct Module<T: PID> {
-    _val: T,
 }
 
 pub  trait Field: PID + Div + Div<Output=Self> {}

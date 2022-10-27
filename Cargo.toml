@@ -1,2 +1,2 @@
 [workspace]
-members = ["util", "algebra", "top_spaces"]
+members = ["util", "algebra", "topo_spaces"]

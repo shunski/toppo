@@ -8,6 +8,7 @@ use num::integer::gcd;
 use crate::commutative::Zero;
 use crate::commutative::One;
 use crate::commutative::NegativeOne;
+use crate::commutative::Symbol;
 
 #[derive(PartialEq, Eq, Copy, Clone)]
 pub struct Rational {
@@ -190,6 +191,12 @@ impl One for Rational {
 impl NegativeOne for Rational {
     fn negative_one() -> Self {
         Rational::new(-1, 1)
+    }
+}
+
+impl Symbol for Rational {
+    fn symbol() -> String {
+        "Q".to_string()
     }
 }
 

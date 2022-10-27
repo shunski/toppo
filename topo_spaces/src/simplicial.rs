@@ -1,6 +1,5 @@
-use crate::Space;
+use crate::Complex;
 use util::bitwise::count_ones;
-use algebra::commutative::Field;
 
 pub trait VertexLabel: std::clone::Clone + std::cmp::Eq {}
   
@@ -463,13 +462,13 @@ mod simplicial_cplx_tests {
 }
 
 
-use algebra::module::matrix::Matrix;
+use algebra::lin_alg::matrix::Matrix;
 
 
-impl<T: VertexLabel, Coeff: Field + std::fmt::Debug + std::fmt::Display> Space<Coeff> for SimplicialCplx<T> 
+impl<T: VertexLabel> Complex for SimplicialCplx<T> 
 {
-    fn get_boundary_map(&self) -> Vec<Matrix<Coeff>> {
-        let mut boundary_maps: Vec<Matrix<Coeff>> = Vec::new();
+    fn boundary_map(&self) -> Vec<Matrix<i64>> {
+        let mut boundary_maps: Vec<Matrix<i64>> = Vec::new();
         if self.maximal_cells.is_empty() {
             return boundary_maps;
         }
@@ -487,14 +486,14 @@ impl<T: VertexLabel, Coeff: Field + std::fmt::Debug + std::fmt::Display> Space<C
             // iterate over n-cells
             for (j, n_cell) in n_cells.iter().enumerate() {
                 let boundary = n_cell.get_face();
-                let mut sign = Coeff::one();
+                let mut sign = 1;
                 // iterate over (n-1)-cells
                 n_minus_1_cells.iter()
                     .enumerate()
                     .filter( |(_, n_minus_1_cell)| boundary.contains(n_minus_1_cell))
                     .for_each(|(i, _)| {
                         boundary_map.write(i, j, sign);
-                        sign = sign * (Coeff::zero() - Coeff::one());
+                        sign = sign * (-1);
                 } );
             }
             n_cells = n_minus_1_cells;
@@ -513,20 +512,20 @@ impl<T: VertexLabel, Coeff: Field + std::fmt::Debug + std::fmt::Display> Space<C
 }#[cfg(test)]
 mod simpilicial_cplx_space_tests {
     use crate::simplicial::*;
-    use algebra::commutative::rational::*;
+    use crate::*;
 
     #[test]
     fn homology_test() {
-        // testing with the circle (S^1)
+        // test1: with the circle (S^1)
         let circle = simplicial_cplx!{
             {"v1", "v2"},
             {"v2", "v3"},
             {"v3", "v1"}
         };
-        assert_eq!( H!(circle; Rational), vec![1,1] );
+        assert_eq!( H!(circle), "dim 0: Z,\ndim 1: Z,\n" );
 
 
-        // testing with the sphere (S^2)
+        // test2: with the sphere (S^2)
         let sphere = simplicial_cplx! {
             {"v0", "v1", "v2"},
             {"v0", "v2", "v3"},
@@ -535,10 +534,10 @@ mod simpilicial_cplx_space_tests {
             {"v4", "v2", "v3"},
             {"v4", "v3", "v1"}
         };
-        assert_eq!( H!(sphere; Rational), vec![1,0,1] );
+        assert_eq!( H!(sphere), "dim 0: Z,\ndim 1: 0,\ndim 2: Z,\n" );
 
 
-        // testing with the torus
+        // test3: with the torus
         let torus = simplicial_cplx!{ 
             {"v0", "v1", "v3"},
             {"v1", "v3", "v5"},
@@ -559,6 +558,44 @@ mod simpilicial_cplx_space_tests {
             {"v0", "v1", "v6"},
             {"v0", "v4", "v6"}
         };
-        assert_eq!(H!(torus; Rational), vec![1,2,1]);
+        assert_eq!(H!(torus), "dim 0: Z,\ndim 1: Z^2,\ndim 2: Z,\n");
+
+        // test4: with the RP2
+        let rp2 = simplicial_cplx!{ 
+            {"1", "3", "4"},
+            {"2", "3", "4"},
+            {"1", "4", "5"},
+            {"2", "4", "6"},
+            {"4", "5", "6"},
+            {"1", "2", "6"},
+            {"1", "3", "6"},
+            {"3", "5", "6"},
+            {"2", "3", "5"},
+            {"1", "2", "5"}
+        };
+        assert_eq!(H!(rp2), "dim 0: Z,\ndim 1: Z_2,\n");
+
+        // test5: with the klein bottle
+        let klein_bottle = simplicial_cplx!{ 
+            {"0", "1", "4"},
+            {"0", "1", "6"},
+            {"0", "2", "6"},
+            {"0", "2", "8"},
+            {"0", "3", "4"},
+            {"0", "3", "8"},
+            {"1", "2", "5"},
+            {"1", "2", "7"},
+            {"1", "4", "5"},
+            {"1", "6", "7"},
+            {"2", "5", "6"},
+            {"2", "7", "8"},
+            {"3", "4", "7"},
+            {"3", "5", "6"},
+            {"3", "5", "8"},
+            {"3", "6", "7"},
+            {"4", "5", "8"},
+            {"4", "7", "8"}
+        };
+        assert_eq!(H!(klein_bottle), "dim 0: Z,\ndim 1: Z + Z_2,\n");
     }
 }

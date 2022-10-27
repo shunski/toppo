@@ -1,5 +1,6 @@
 #![allow(unused)]
 
+use std::collections::binary_heap::Iter;
 use std::thread::current;
 
 pub mod bitwise {
@@ -14,9 +15,15 @@ pub mod bitwise {
 }
 
 
-#[derive(Clone, PartialEq)]
+
+#[derive(Clone, Eq, PartialEq)]
 pub struct BinaryPool {
+    // "len" is the number of 0's and 1's
     len: usize,
+
+    // "n_elements" is the number of 1's
+    n_elements: usize,
+
     data: Vec<u64>
 }
 
@@ -24,6 +31,7 @@ impl BinaryPool {
     pub fn new(len: usize) -> BinaryPool {
         BinaryPool {
             len: len,
+            n_elements: 0,
             data: vec![0; len/64+1],
         }
     }
@@ -36,6 +44,7 @@ impl BinaryPool {
 
         let mut pool = BinaryPool { 
             len: len, 
+            n_elements: 0, 
             data: data,
         };
 
@@ -54,35 +63,59 @@ impl BinaryPool {
 
     pub fn add(&mut self, index: usize) {
         self.check_bounds(index);
+
+        if !self.contains(index) {
+            self.n_elements += 1;
+        }
+
         self.data[index/64] |= 1 << (index % 64);
     }
 
-    pub fn subtract(&mut self, index: usize) {
+    pub fn remove(&mut self, index: usize) {
         self.check_bounds(index);
+
+        if self.contains(index) {
+            self.n_elements -= 1;
+        }
+
         self.data[index/64] &= !(1 << (index % 64));
     }
 
     pub fn union(mut self, mut other: Self ) -> Self {
         self.check_len(&other);
         self.data.iter_mut().zip(other.data.iter()).for_each(|(x, &y)| *x |= y);
+        self.n_elements = self.data.iter().map(|&s| bitwise::count_ones(s)).sum();
         self
     }
 
     pub fn intersection(mut self, mut other: Self ) -> Self {
         self.check_len(&other);
         self.data.iter_mut().zip( other.data.iter() ).for_each(|(x, &y)| *x &= y);
+        self.n_elements = self.data.iter().map(|&s| bitwise::count_ones(s)).sum();
         self
     }
 
+    pub fn fill(&mut self) {
+        (0..self.len()).for_each( |i| self.add(i) );
+    }
+
+    #[inline]
     pub fn len(&self) -> usize {
         self.len
     }
 
+    #[inline]
+    pub fn n_elements(&self) -> usize {
+        self.n_elements
+    }
+
+    #[inline]
     pub fn contains(&self, index: usize) -> bool {
         self.check_bounds(index);
         self.data[index/64] & (1 << (index%64)) == 1 << (index%64)
     } 
 
+    #[inline]
     fn check_bounds(&self, index: usize) {
         if index >= self.len() { panic!("index out of bounds: len={} but index={}", self.len(), index); };
     }
@@ -95,12 +128,40 @@ impl BinaryPool {
     pub fn check_len(&self, other: &Self) {
         if self.len != other.len { panic!("two pools are not comparable. One has len {} but the other has len {}", self.len, other.len ) }
     }
+
+    pub fn is_full(&self) -> bool {
+        self.n_elements == self.len
+    }
 }
 
-use std::fmt;
+
+pub struct BinaryPoolIter<'a> {
+    data: &'a BinaryPool,
+    curr: std::ops::Range<usize>,
+}
+
+impl<'a> BinaryPool {
+    pub fn iter(&'a self) -> BinaryPoolIter {
+        BinaryPoolIter { 
+            data: self, 
+            curr: (0..self.len), 
+        }
+    }
+}
+
+impl<'a> Iterator for BinaryPoolIter<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.curr.find(|&i| self.data.contains(i))
+    }
+}
+
+use std::fmt::{self, Binary};
 impl fmt::Debug for BinaryPool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "len = {}, ", self.len())?;
+        write!(f, "n_elements = {}, ", self.n_elements())?;
         write!(f, "data = [")?;
         for i in 0..self.len() {
             if self.contains(i) {
@@ -132,8 +193,17 @@ mod binary_pool_test {
 
         let mut z = BinaryPool::from(10, vec![1, 3, 5, 7, 9]);
         let mut w = BinaryPool::from(10, vec![0, 2, 4, 6, 8]);
-        assert_eq!(z.clone().intersection(w.clone()), x);
-        assert_eq!(z.clone().union(w.clone()), y);
+
+        let a = z.clone().intersection(w.clone());
+        let b = z.clone().union(w.clone());
+
+        assert_eq!(x.n_elements(), 0);
+        assert_eq!(y.n_elements(), 10);
+        assert_eq!(z.n_elements(), 5);
+        assert_eq!(w.n_elements(), 5);
+
+        assert_eq!(a, x);
+        assert_eq!(b, y);
 
         assert_eq!(x.is_subset_of(&x), true);
         assert_eq!(x.is_subset_of(&y), true);
@@ -148,7 +218,15 @@ mod binary_pool_test {
         z.add(2);
         w.add(1);
 
-        assert_eq!(z.clone().intersection(w.clone()), BinaryPool::from(10, vec![1,2]));
+        let a = z.clone().intersection(w.clone());
+        let b = z.clone().union(w.clone());
+
+        assert_eq!(z.n_elements(), 6);
+        assert_eq!(w.n_elements(), 6);
+        assert_eq!(a.n_elements(), 2);
+        assert_eq!(b.n_elements(), 10);
+
+        assert_eq!(a, BinaryPool::from(10, vec![1,2]));
 
         assert_eq!(x.is_subset_of(&y), true);
         assert_eq!(y.is_subset_of(&x), false);
@@ -163,6 +241,110 @@ mod binary_pool_test {
         let x = BinaryPool::from(100, (0..100).collect());
         assert_eq!(z.is_subset_of(&x), true);
         assert_eq!(x.is_subset_of(&z), false);
+    }
+
+    #[test] 
+    fn iter_test() {
+        let v = vec![1, 4, 5, 7, 8, 9];
+        let x = BinaryPool::from(10, v.clone());
+        assert_eq!( x.iter().collect::<Vec<_>>(), v);
+    }
+}
+
+
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct LabeledSet<T> 
+    where T: PartialEq + Eq + std::fmt::Debug
+{
+    set: BinaryPool,
+    labels: Vec<T>,
+}
+
+impl <T> LabeledSet<T>
+    where T: PartialEq + Eq + Clone + std::fmt::Debug
+{
+    pub fn new(labels: Vec<T>) -> LabeledSet<T> {
+        LabeledSet { 
+            set: BinaryPool::new( labels.len() ), 
+            labels: labels,
+        }
+    }
+
+    pub fn add(&mut self, label: T) {
+        match self.labels.iter().position(|l| l == &label) {
+            Some(p) => self.set.add(p),
+            None => panic!("The label '{:?}' is not registered", label),
+        }
+    }
+
+    pub fn remove(&mut self, label: T) {
+        match self.labels.iter().position(|l| l == &label) {
+            Some(p) => self.set.remove(p),
+            None => panic!("The label '{:?}' is not registered", label),
+        }
+    }
+}
+
+pub struct LabeledSetIter<'a, T> 
+    where T: PartialEq + Eq + Clone + std::fmt::Debug
+{
+    data: &'a LabeledSet<T>,
+    curr: BinaryPoolIter<'a>
+}
+
+impl<'a, T> Iterator for LabeledSetIter<'a, T>
+    where T: PartialEq + Eq + Clone + std::fmt::Debug
+{
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(i) = self.curr.next() {
+            Some(&self.data.labels[i])
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a, T> LabeledSet<T> 
+    where T: PartialEq + Eq + Clone + std::fmt::Debug
+{
+    pub fn iter(&'a self) -> LabeledSetIter<'a, T> {
+        LabeledSetIter { 
+            data: self, 
+            curr: self.set.iter()
+        }
+    }
+}
+
+#[cfg(test)]
+mod labled_set_test {
+    use crate::LabeledSet;
+
+    #[test]
+    fn init_test() {
+        LabeledSet::new( vec!["1", "2", "3"] );
+    }
+
+    fn deref_test() {
+        let mut set1 = LabeledSet::new( vec!["1", "2", "3"] );
+        let mut set2 = set1.clone();
+
+        set1.add("1"); set1.add("2"); set1.add("3"); set1.remove("1"); set1.remove("1"); 
+        set2.add("2"); set2.add("3");
+
+        assert_eq!(set1, set2);
+    }
+
+    #[test]
+    fn iter_test() {
+        let mut set = LabeledSet::new( vec!["1", "2", "3"] );
+        assert_eq!( set.iter().map(|&x| x).collect::<Vec<_>>(), Vec::<&str>::new());
+        set.add("1"); 
+        assert_eq!( set.iter().map(|&x| x).collect::<Vec<_>>(), vec!["1"]);
+        set.add("2"); set.add("3"); set.remove("1"); 
+        assert_eq!( set.iter().map(|&x| x).collect::<Vec<_>>(), vec!["2", "3"]);
     }
 }
 
