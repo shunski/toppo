@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 util = { path = "../util" }
-algebra = { path = "../algebra" }
+alg = { path = "../alg" }
+plotters = "0.3.3"

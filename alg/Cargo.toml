@@ -1,8 +1,9 @@
 [package]
-name = "algebra"
+name = "alg"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 num = "*"
+rand = "*"
 util = { path = "../util" }

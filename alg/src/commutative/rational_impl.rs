@@ -1,21 +1,22 @@
+use super::Rational;
+
+use std::iter::Product;
+use std::iter::Sum;
 use std::ops::Add;
+use std::ops::Neg;
 use std::ops::Sub;
 use std::ops::Mul;
 use std::ops::Div;
+use std::ops::AddAssign;
+use std::ops::SubAssign;
+use std::ops::MulAssign;
+use std::ops::DivAssign;
 use std::cmp::Ordering;
 use num::integer::gcd;
 
 use crate::commutative::Zero;
 use crate::commutative::One;
-use crate::commutative::NegativeOne;
 use crate::commutative::Symbol;
-
-#[derive(PartialEq, Eq, Copy, Clone)]
-pub struct Rational {
-    numerator: u64,
-    denumerator: u64,
-    sign: bool,
-}
 
 impl Rational {
     pub fn new(n: i64, d: i64)-> Rational {
@@ -87,30 +88,6 @@ impl PartialOrd for Rational {
     }
 }
 
-pub trait RationalFromInteger {
-    fn as_rational(&self) -> Rational;
-    fn over(&self, d: Self) -> Rational;
-}
-
-macro_rules! rational_from_impl {
-    ($($t:ty)*) => ($(
-        impl RationalFromInteger for $t {
-            #[inline]
-            fn as_rational(&self) -> Rational { 
-                let n = *self as i64;
-                Rational::new(n, 1)
-            }
-            fn over(&self, d: Self) -> Rational { 
-                let n = *self as i64;
-                let d = d as i64;
-                Rational::new(n, d)
-             }
-        }
-    )*)
-}
-
-rational_from_impl! { isize i8 i16 i32 i64 usize }
-
 
 impl Add for Rational {
     type Output = Self;
@@ -143,7 +120,7 @@ impl Sub for Rational {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        self + rhs * (-1).as_rational()
+        self + rhs * -Self::one()
     }
 }
 
@@ -165,7 +142,7 @@ impl Div for Rational {
     type Output = Self;
 
     fn div(self, rhs: Self) -> Self::Output {
-        if rhs == 0.as_rational() { panic!("Cannot divide by zero.") };
+        if rhs == Self::zero() { panic!("Cannot divide by zero.") };
         let mut r = Rational { 
             numerator: self.numerator * rhs.denumerator, 
             denumerator: self.denumerator * rhs.numerator,
@@ -173,6 +150,29 @@ impl Div for Rational {
         };
         r.optimize();
         r
+    }
+}
+
+macro_rules! op_assign_impl {
+    ($t:ty, $op_assign_trait:ident, $op_assign:ident, $op_trait:ident, $op:ident) => {
+        impl $op_assign_trait for $t {
+            fn $op_assign(&mut self, rhs: $t) {
+                *self =  $op_trait::$op( *self, rhs);
+            }
+        }
+    };
+}
+
+op_assign_impl!( Rational, AddAssign, add_assign, Add, add );
+op_assign_impl!( Rational, SubAssign, sub_assign, Sub, sub );
+op_assign_impl!( Rational, MulAssign, mul_assign, Mul, mul );
+op_assign_impl!( Rational, DivAssign, div_assign, Div, div );
+
+impl Neg for Rational {
+    type Output = Rational;
+    fn neg(mut self) -> Self::Output {
+        self.sign = !self.sign;
+        self
     }
 }
 
@@ -188,15 +188,22 @@ impl One for Rational {
     }
 }
 
-impl NegativeOne for Rational {
-    fn negative_one() -> Self {
-        Rational::new(-1, 1)
-    }
-}
-
 impl Symbol for Rational {
     fn symbol() -> String {
         "Q".to_string()
+    }
+}
+
+
+impl Sum for Rational {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Rational::zero(), |accum, a| accum + a)
+    }
+}
+
+impl Product for Rational {
+    fn product<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Rational::zero(), |accum, a| accum * a)
     }
 }
 
@@ -232,37 +239,35 @@ impl std::fmt::Display for Rational {
 
 #[cfg(test)]
 mod rational_test {
+    use crate::commutative::{Rational, Zero, One};
+    use crate::rational;
     #[test] 
     fn init_tests() {
-        use crate::commutative::rational::*;
-
         assert_eq!(Rational::new(-1, 1), Rational{ numerator: 1, denumerator: 1, sign: false });
         assert_eq!(Rational::new(0, 10), Rational{ numerator: 0, denumerator: 1, sign: true });
         assert_eq!(Rational::new(9, -6), Rational{ numerator: 3, denumerator: 2, sign: false });
         assert_eq!(Rational::new(-9, -3), Rational{ numerator: 3, denumerator: 1, sign: true });
 
         assert_eq!(Rational::new(-4, -6), Rational::new(2, 3));
-        assert_eq!(Rational::new(15, -12), Rational::new(5, 4) * (-1).as_rational());
+        assert_eq!(Rational::new(15, -12), Rational::new(5, 4) * rational!(-1));
         assert_eq!(Rational::new(-4, 6).abs(), Rational::new(2, 3));
 
-        assert_eq!(Rational::new(-4, 6), (-2).over(3));
-        assert_eq!(Rational::zero(), (0).over(1));
+        assert_eq!(Rational::new(-4, 6), rational!(-2; 3));
+        assert_eq!(Rational::zero(), rational!(0; 1));
     }
 
     #[test] 
     fn arithmetic_test() {
-        use crate::commutative::rational::*;
-
         let r1 = Rational::new(-2, 2);
-        assert_eq!(r1, (-1).as_rational());
-        assert_eq!(Rational::zero()-Rational::one(), (-1).as_rational());
+        assert_eq!(r1, rational!(-1));
+        assert_eq!(Rational::zero()-Rational::one(), rational!(-1));
 
         let r2 = Rational::from(-2);
         assert_eq!(r2, Rational::new(-2, 1));
 
         assert_eq!(r2 < r1, true);
 
-        let r3 = 3.as_rational() / r2;
+        let r3 = rational!(3) / r2;
         assert_eq!(r3, Rational::new(-3, 2));
 
         let r4 = r3 + Rational::new(2, 3);
@@ -274,7 +279,7 @@ mod rational_test {
         let r6 = r5 - Rational::new(2, 3);
         assert_eq!(r6, Rational::new( 7, 12));
 
-        let r7 = 0.over(3); 
+        let r7 = rational!(0;3); 
         assert_eq!(r7 * r7, Rational::new( 0, 1)); 
         assert_eq!(r6+r7, r6);
 
@@ -283,17 +288,13 @@ mod rational_test {
     #[test]
     #[should_panic]
     fn init_with_denumerator_zero() {
-        use crate::commutative::rational::*;
-
         let _a = Rational::new(100, 0);
     }
 
     #[test]
     #[should_panic]
     fn division_by_zero_1() {
-        use crate::commutative::rational::*;
-
-        let a = 3.as_rational();
+        let a = rational!(3);
         let b = a - a;
         let b = b * Rational::from(-1000);
         let _ = a / b;
