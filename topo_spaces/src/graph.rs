@@ -1,27 +1,29 @@
-use algebra::permutation;
+use alg::permutation;
 use util::BinaryPool;
-use algebra::commutative::rational::*;
+use alg::commutative::{PID, Rational};
+use alg::lin_alg::Matrix;
+use alg::rational;
 use std::fmt;
-use algebra::non_commutative::{permutation::*, Group};
+use alg::non_commutative::{permutation::*, Group};
 
 #[allow(unused)]
 #[derive(Clone)]
-struct Edge {
-    distance: f64,
+struct Edge<T: PID> {
+    weight: T,
 }
 
-impl Edge {
-    fn new() -> Edge {
+impl<T: PID> Edge<T> {
+    fn new() -> Edge<T> {
         Edge{
-            distance: 1.0,
+            weight: T::one(),
         }
     }
 }
 
 
 #[allow(unused)]
-pub struct Graph {
-    data: Vec<Vec<Vec<Edge>>>,
+pub struct Graph<T: PID> {
+    data: Vec<Vec<Vec<Edge<T>>>>,
     vertices_labeling: Vec<String>,
 
     n_non_loop_edges: usize,
@@ -31,8 +33,8 @@ pub struct Graph {
 
 
 #[allow(unused)]
-impl Graph {
-    pub fn from( edges: Vec<(String, String)> ) -> Graph {
+impl<T: PID> Graph<T> {
+    pub fn from( edges: Vec<(String, String)> ) -> Self {
         let mut n_non_loop_edges = edges.len();
         let mut n_non_loop_edges_up_to_multiplicity = edges.len();
         let mut n_loops = 0;
@@ -117,7 +119,27 @@ macro_rules! graph {
             $(
                 v.push(($v1.to_string(), $v2.to_string()));
             )*
-            crate::graph::Graph::from(v)
+            crate::graph::Graph::<i64>::from(v)
+        }
+    };
+
+    ( $([$v1: expr, $v2: expr; weight=$weight: expr]), *) => {
+        {
+            let mut v = Vec::new();
+            $(
+                v.push(($v1.to_string(), $v2.to_string(), $weight));
+            )*
+            crate::graph::WeightedSimpleGraph::from(v)
+        }
+    };
+
+    ( embedding=$embedding: expr, weight_fn=$weight_fn: expr, $([$v1: expr, $v2: expr]), *) => {
+        {
+            let mut v = Vec::new();
+            $(
+                v.push(($v1.to_string(), $v2.to_string(), $weight_fn( *$embedding.get($v1).unwrap(), *$embedding.get($v2).unwrap())));
+            )*
+            crate::graph::WeightedSimpleGraph::from(v)
         }
     };
 }
@@ -217,7 +239,7 @@ impl fmt::Display for SimpleVertex {
 }
 
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Eq, PartialEq, Clone)]
 pub struct RawSimpleGraph {
     data: BinaryPool,
     n_vertices: usize,
@@ -383,9 +405,27 @@ impl std::fmt::Display for RawSimpleGraph {
     }
 }
 
+// Debug
+impl std::fmt::Debug for RawSimpleGraph {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for i in 0..self.n_vertices() {
+            for _ in 0..i {
+                write!(f, "  ")?;
+            }
+            if i<10 { write!(f, " ")?; }
+            write!(f, "{}", i)?;
+            for j in i+1..self.n_vertices() {
+                write!(f, " {}", if self.contains(i, j) {"+"} else {" "} )?;
+            }
+            write!(f, "\n")?;
+        }
+        write!(f, "")
+    }
+}
+
 
 // symmetric action on 'RawSimpleGraph'
-use algebra::non_commutative::Gset;
+use alg::non_commutative::Gset;
 impl Gset<Permutation> for RawSimpleGraph {
     fn gen_action_by(&mut self, elem: Permutation) {
         // First, process the case that 'elem' is the identity
@@ -436,7 +476,7 @@ macro_rules! raw_graph {
 #[cfg(test)]
 mod raw_simple_graph_test {
     use crate::graph::RawSimpleGraph;
-    use algebra::{non_commutative::{permutation::*, Group}, permutation};
+    use alg::{non_commutative::{permutation::*, Group}, permutation};
 
     #[test]
     fn iter_and_erase_test() {
@@ -677,24 +717,31 @@ impl RawSimpleGraph {
     fn choose_base_point(&mut self) -> Permutation {
         // -- if the vertex 0 is of degree one, we can just let this point to be the base point
         if self.degree_of(0) != 1 {
-            // -- otherwuse, we want a vertex v such that the graph with a vertex v removed is connected.
+            // -- otherwise, we want an essential vertex v such that the graph with v deleted is connected.
             for i in 0..self.n_vertices() {
-                // remove edges adjacent to i and see if the resulting graph is connected
-                let tmp_edges: Vec<_> = self.adjacent_vertices_iter(i).map(|j| if i<j {(i, j)} else {(j, i)} ).collect();
-                self.remove_edges_adjacent_to(i);
-                self.add_edge( tmp_edges.first().unwrap().0, tmp_edges.first().unwrap().1 ); // add one edge back in, so that the vertex i belongs to one of the components
-                let connected = self.is_connected();
-                // recover the graph
-                tmp_edges.iter().for_each(|&(i, j)| self.add_edge(i, j) );
+                // if i is not essential, then continue.
+                if self.degree_of(i) ==1 {
+                    self.swap(0, i);
+                    // return the permutation that represents this swap
+                    return permutation!{ (0, i) };
+                } if self.degree_of(i) >= 3 {
+                    // remove edges adjacent to i and see if the resulting graph is connected
+                    let tmp_edges: Vec<_> = self.adjacent_vertices_iter(i).map(|j| if i<j {(i, j)} else {(j, i)} ).collect();
+                    self.remove_edges_adjacent_to(i);
+                    self.add_edge( tmp_edges.first().unwrap().0, tmp_edges.first().unwrap().1 ); // add one edge back in, so that the vertex i belongs to one of the components
+                    let connected = self.is_connected();
+                    // recover the graph
+                    tmp_edges.iter().for_each(|&(i, j)| self.add_edge(i, j) );
 
-                //  if connected bring the vertex to the front
-                if connected { 
-                    if i==0 {
-                        return Permutation::identity()
-                    } else {
-                        self.swap(0, i);
-                        // return the permutation that represents this swap
-                        return permutation!{ (0, i) };
+                    //  if connected bring the vertex to the front
+                    if connected { 
+                        if i==0 {
+                            return Permutation::identity()
+                        } else {
+                            self.swap(0, i);
+                            // return the permutation that represents this swap
+                            return permutation!{ (0, i) };
+                        }
                     }
                 }
             }
@@ -800,9 +847,9 @@ impl RawSimpleGraph {
 
 
 #[cfg(test)]
-mod maximal_graph_test {
+mod maximal_tree_test {
     use super::RawSimpleGraph;
-    use algebra::{non_commutative::{permutation::*, Group}, permutation};
+    use alg::{non_commutative::{permutation::*, Group}, permutation};
 
     fn check_edges(before_choosing_maximal_tree: &RawSimpleGraph, after_choosing_maximal_tree: &RawSimpleGraph, p: &Permutation) {
         for j in 0..before_choosing_maximal_tree.n_vertices() {
@@ -884,7 +931,7 @@ mod maximal_graph_test {
         };
 
         let p = graph.choose_base_point();
-        assert_eq!(p, permutation!{ (0,1) });
+        assert_eq!(p, permutation!{ (0,4) });
     }
 
     #[test]
@@ -906,7 +953,7 @@ mod maximal_graph_test {
 
         let p = graph.choose_base_point();
         let p = graph.choose_maximal_tree_by_depth_first() * p;
-        assert_eq!(p, permutation!{(0,1)(2,5,4,7)(3,6)} );
+        assert_eq!(p, permutation!{(0,4)(1,3)(5,7)} );
 
         graph_cpy <<= p.clone();
         assert_eq!(graph, graph_cpy);
@@ -935,7 +982,7 @@ mod maximal_graph_test {
         graph.is_maximal_tree_chosen = true;
         let p = graph.modify_ordering_of_the_branches() * p;
 
-        assert_eq!(p, permutation!{(0,1)(2, 7, 4, 9, 3, 8)(5,6)} );
+        assert_eq!(p, permutation!{(0,4)(1,3)(5,9,6,8)} );
 
         graph_cpy <<= p.clone();
         graph_cpy.is_maximal_tree_chosen = true;
@@ -970,21 +1017,11 @@ impl SimpleGraph {
         }
     }
 
-    pub fn from(graph: &Graph ) -> Self {
+    pub fn from(graph: &Graph<i64> ) -> Self {
         Self::subdivided_graph_from(graph, 2)
     }
 
-    // this function is needed by the test functions outside this module
-    pub fn without_lables_from( graph: RawSimpleGraph ) -> Self {
-        let n_vertices  = graph.n_vertices();
-        SimpleGraph {
-            data: graph,
-            vertices_list: vec![SimpleVertex::Essential("".to_string()); n_vertices],
-            n_essential_vertices: 0,
-        }
-    }
-
-    pub fn subdivided_graph_from(graph: &Graph, n_marked_points: usize) -> Self {
+    pub fn subdivided_graph_from(graph: &Graph<i64>, n_marked_points: usize) -> Self {
         // When n_marked_points < 2, we create a graph subdivided for n_marked_points = 2 (This will guerantee that the resulting graph is simple).
         let n_marked_points = if n_marked_points < 2 { 
             2
@@ -1021,11 +1058,11 @@ impl SimpleGraph {
 
                 for (k, edge) in graph.data[i][j].iter().enumerate() {
                     subdivided_graph.data.add_edge(i, subdivided_graph.n_vertices());
-                    subdivided_graph.vertices_list.push(SimpleVertex::Redundant(VertexVector::new(graph.vertices_labeling[i].clone(), graph.vertices_labeling[j].clone(), k, 1.over(n_marked_points-1))));
+                    subdivided_graph.vertices_list.push(SimpleVertex::Redundant(VertexVector::new(graph.vertices_labeling[i].clone(), graph.vertices_labeling[j].clone(), k, rational!( 1; n_marked_points-1))));
 
                     for l in 2..=n_mid_vertices {
                         subdivided_graph.data.add_edge(subdivided_graph.n_vertices()-1, subdivided_graph.n_vertices());
-                        subdivided_graph.vertices_list.push(SimpleVertex::Redundant(VertexVector::new(graph.vertices_labeling[i].clone(), graph.vertices_labeling[j].clone(), k, l.over(n_marked_points-1))));
+                        subdivided_graph.vertices_list.push(SimpleVertex::Redundant(VertexVector::new(graph.vertices_labeling[i].clone(), graph.vertices_labeling[j].clone(), k, rational!( l; n_marked_points-1))));
                     }
 
                     subdivided_graph.data.add_edge(j, subdivided_graph.n_vertices()-1);
@@ -1037,11 +1074,11 @@ impl SimpleGraph {
 
             for (k, edge) in graph.data[i][i].iter().enumerate() {
                 subdivided_graph.data.add_edge(i, subdivided_graph.n_vertices());
-                subdivided_graph.vertices_list.push(SimpleVertex::Redundant(VertexVector::new(graph.vertices_labeling[i].clone(), graph.vertices_labeling[i].clone(), k, 1.over(n_marked_points+1))));
+                subdivided_graph.vertices_list.push(SimpleVertex::Redundant(VertexVector::new(graph.vertices_labeling[i].clone(), graph.vertices_labeling[i].clone(), k, rational!( 1; n_marked_points+1))));
 
                 for l in 2..=n_mid_vertices {
                     subdivided_graph.data.add_edge(subdivided_graph.n_vertices()-1, subdivided_graph.n_vertices());
-                    subdivided_graph.vertices_list.push(SimpleVertex::Redundant(VertexVector::new(graph.vertices_labeling[i].clone(), graph.vertices_labeling[i].clone(), k, l.over(n_marked_points+1))));
+                    subdivided_graph.vertices_list.push(SimpleVertex::Redundant(VertexVector::new(graph.vertices_labeling[i].clone(), graph.vertices_labeling[i].clone(), k, rational!( l; n_marked_points+1))));
                 }
 
                 subdivided_graph.data.add_edge(i, subdivided_graph.n_vertices()-1);
@@ -1082,11 +1119,12 @@ mod simple_graph_test {
             ["v0", "v0"],
             ["v0", "v1"],
             ["v0", "v1"],
-            ["v1", "v1"]
+            ["v1", "v1"],
+            ["v1", "v2"]
         };
 
         let simple_graph = SimpleGraph::from(&graph);
-        assert_eq!(simple_graph.n_vertices(), 8);
+        assert_eq!(simple_graph.n_vertices(), 10);
     }
 
     #[test]
@@ -1189,13 +1227,13 @@ impl CubeFactor {
     pub fn edge(self) -> (usize, usize) {
         match self {
             Self::Edge(x, y) => (x, y),
-            Self::Vertex(x) => panic!("unwrap Failed: ({}) is not an edge", x),
+            Self::Vertex(x) => panic!("unwrap failed: ({}) is not an edge", x),
         }
     }
 
     pub fn vertex(self) -> usize {
         match self {
-            Self::Edge(x, y) => panic!("unwrap Failed: ({}, {}) is not a vertex", x, y),
+            Self::Edge(x, y) => panic!("unwrap failed: ({}, {}) is not a vertex", x, y),
             Self::Vertex(x) => x,
         }
     }
@@ -1211,9 +1249,24 @@ impl CubeFactor {
         let (i, j) = other.edge();
         let k = self.vertex();
 
-        if k<=i || k>=j { return false; }
+        i<k && k<j
+    }
 
-        k - i == 1
+    pub fn is_blocked(self, factors: &[CubeFactor], graph: &RawSimpleGraph) -> bool {
+        if let CubeFactor::Vertex(v) = self {
+            // if this is the basepoint of the tree, then this is trivially bloecked.
+            if v == 0 { return true; }
+
+            // otherwise. let it flow and check
+            let w = self.flow(graph).terminal();
+            if factors.iter().any(|&f| (f.is_vertex() && f == w) || (f.is_edge() && ( f.terminal() == w || f.initial() == w )) ) {
+                true
+            } else {
+                false
+            }
+        } else {
+            panic!("fanleed to unwrap. Input must be a vertex");
+        }
     }
 
     pub fn terminal(self) -> CubeFactor {
@@ -1224,6 +1277,16 @@ impl CubeFactor {
     pub fn initial(self) -> CubeFactor {
         // note that 'self' must be an edge
         CubeFactor::Vertex( self.edge().1 )
+    }
+
+    pub fn flow(self, graph: &RawSimpleGraph) -> CubeFactor {
+        if let CubeFactor::Vertex(v) = self {
+            if v==0 { panic!("Cannot flow from the basepoint of the maximal tree."); };
+            let terminal = (0..v).rev().find(|&i| graph.contains(i, v) && graph.maximal_tree_contains(i, v) ).unwrap();
+            CubeFactor::Edge( terminal, v )
+        } else {
+            panic!("Cannot to flow. Input must be a vertex.");
+        }
     }
 }
 
@@ -1409,5 +1472,146 @@ mod simple_graph_utility_test {
             CubeFactor::Edge(2,5)
         ];
         assert_eq!(edges, answer);
+    }
+}
+
+
+
+// The functions in this module provides the graphs with maximal trees for the tests in other files
+pub mod graphs_for_tests {
+    // we manually create the graph of K_{5,5} with a maximal tree.
+    use crate::graph::*;
+
+    #[allow(unused)]
+    pub fn k_5_5_with_4_marked_points() -> SimpleGraph {
+        let mut raw_graph = RawSimpleGraph::new(25);
+        // add deleted edges
+        raw_graph.add_edge(0, 8);
+        raw_graph.add_edge(0, 15);
+        raw_graph.add_edge(0, 24);
+        raw_graph.add_edge(3, 13);
+        raw_graph.add_edge(3, 22);
+        raw_graph.add_edge(6, 20);
+        // add non-order-respecting edges in the maximal tree
+        raw_graph.add_edge(6, 9);
+        raw_graph.add_edge(11, 14);
+        raw_graph.add_edge(11, 16);
+        raw_graph.add_edge(18, 21);
+        raw_graph.add_edge(18, 23);
+        (0..25-1).filter(|&i| i!=8 && i!=13 && i!=15 && i!=20 && i!=22 ).for_each(|i| raw_graph.add_edge(i, i+1));
+
+        raw_graph.is_maximal_tree_chosen = true;
+
+        SimpleGraph {
+            data: raw_graph,
+            vertices_list: vec![SimpleVertex::Essential("".to_string()); 25],
+            n_essential_vertices: 0,
+        }
+    }
+
+    #[allow(unused)]
+    pub fn skeleton_of_cube_with_4_marked_points() -> SimpleGraph {
+        let mut raw_graph = RawSimpleGraph::new(32);
+        // add deleted edges
+        raw_graph.add_edge(0, 11);
+        raw_graph.add_edge(0, 19);
+        raw_graph.add_edge(3, 24);
+        raw_graph.add_edge(6, 29);
+        raw_graph.add_edge(14, 31);
+        // add non-order-respecting edges in the maximal tree
+        raw_graph.add_edge(9, 12);
+        raw_graph.add_edge(17, 20);
+        raw_graph.add_edge(22, 25);
+        raw_graph.add_edge(27, 30);
+        // add order-respecting edges in the maximal tree
+        (0..32-1).filter(|&i| i!=11 && i!=19 && i!=24 && i!=29 ).for_each(|i| raw_graph.add_edge(i, i+1));
+
+        raw_graph.is_maximal_tree_chosen = true;
+
+        SimpleGraph {
+            data: raw_graph,
+            vertices_list: vec![SimpleVertex::Essential("".to_string()); 32],
+            n_essential_vertices: 0,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct WeightedSimpleGraph<T: PID> {
+    data: Matrix<T>,
+    vertices_labeling: Vec<String>,
+}
+
+impl<T: PID> WeightedSimpleGraph<T> {
+    pub fn from(input: Vec<(String, String, T)>)-> Self {
+        let mut vertices_labeling: Vec<String> = Vec::new();
+        let mut weights = Vec::new();
+        for (v1, v2, weight) in input {
+            assert!( v1!=v2, "loop is not allowed in simple graphs" );
+            let v1_idx =  vertices_labeling.iter().position( |v| v == &v1 );
+            let v2_idx =  vertices_labeling.iter().position( |v| v == &v2 );
+            // assert!( !(v1_idx!=None && v2_idx!=None), "Simple Graph cannot have more than one edge between the identical pair of eddges." );
+
+            let v1_idx = match v1_idx {
+                Some(idx) => idx,
+                None => {
+                    vertices_labeling.push( v1 );
+                    vertices_labeling.len()-1
+                },
+            };
+
+            let v2_idx = match v2_idx {
+                Some(idx) => idx,
+                None => {
+                    vertices_labeling.push( v2 );
+                    vertices_labeling.len()-1
+                },
+            };
+
+            weights.push( (v1_idx, v2_idx, weight) )
+        }
+
+        // register the weights
+        let mut data = Matrix::zero(vertices_labeling.len(), vertices_labeling.len());
+        for (i, j, weight) in weights.into_iter() {
+            data[(i,j)] = weight;
+            data[(j,i)] = weight;
+        }
+
+        WeightedSimpleGraph {
+            data: data,
+            vertices_labeling: vertices_labeling,
+        }
+    }
+
+    pub fn laplacian(self) -> Matrix<T> {
+        let mut laplacian = self.data;
+        let n = laplacian.size.0;
+        for i in 0..n {
+            laplacian[(i,i)] = (0..n).map( |j| laplacian[(i,j)] ).sum();
+        }
+
+        for i in 0..n {
+            for j in 0..n {
+                if i==j {
+                    continue;
+                }
+                laplacian[(i,j)] *= -T::one();
+            }
+        }
+
+        laplacian
+    }
+
+    pub fn n_vertices(&self) -> usize {
+        self.vertices_labeling.len()
+    }
+
+    pub fn vertices(&self) -> &Vec<String> {
+        &self.vertices_labeling
+    }
+
+    pub fn data(&self) -> &Matrix<T> {
+        &self.data
     }
 }

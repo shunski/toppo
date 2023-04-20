@@ -53,7 +53,6 @@ impl Cycle {
     }
 
     fn bring_smallest_first(mut self) -> Self {
-        // this function
         // THIS FUNCTION MUST BE CALLED IN EVERY CONSTRUCTOR unless otherwise stated to be unnecessary.
         let (min_idx, &min) = self.iter().enumerate().min_by_key(|&(i, &e)| e).unwrap();
 

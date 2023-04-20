@@ -284,6 +284,10 @@ impl <T> LabeledSet<T>
             None => panic!("The label '{:?}' is not registered", label),
         }
     }
+
+    pub fn n_elements(&self) -> usize {
+        self.set.n_elements()
+    }
 }
 
 pub struct LabeledSetIter<'a, T> 
@@ -318,6 +322,23 @@ impl<'a, T> LabeledSet<T>
     }
 }
 
+
+impl<T> fmt::Display for LabeledSet<T> 
+    where T: PartialEq + Eq + Clone + std::fmt::Debug + std::fmt::Display
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{")?;
+        let mut iter = self.iter();
+        if let Some(elem) = iter.next() {
+            write!(f, "{}", elem);
+            while let Some(elem) = iter.next() { write!(f, ", {}", elem); }
+        }
+        write!(f, "}}")?;
+        write!(f, "")
+    }
+}
+
+
 #[cfg(test)]
 mod labled_set_test {
     use crate::LabeledSet;
@@ -327,6 +348,7 @@ mod labled_set_test {
         LabeledSet::new( vec!["1", "2", "3"] );
     }
 
+    #[test]
     fn deref_test() {
         let mut set1 = LabeledSet::new( vec!["1", "2", "3"] );
         let mut set2 = set1.clone();
@@ -335,6 +357,7 @@ mod labled_set_test {
         set2.add("2"); set2.add("3");
 
         assert_eq!(set1, set2);
+        assert_eq!(set1.n_elements(), 2);
     }
 
     #[test]

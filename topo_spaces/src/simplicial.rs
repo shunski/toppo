@@ -1,5 +1,6 @@
 use crate::Complex;
 use util::bitwise::count_ones;
+use alg::lin_alg::FormalSum;
 
 pub trait VertexLabel: std::clone::Clone + std::cmp::Eq {}
   
@@ -12,12 +13,14 @@ macro_rules! vertex_label_impl {
 vertex_label_impl!{ String }
 
 #[allow(unused)]
-#[derive(Clone)] 
+#[derive(Clone, PartialEq, Debug)] 
 pub struct Simplex <T: VertexLabel> 
 {
     dim: usize,
     vertices_labels: Vec<T>,
 }
+
+formal_sum_impl!{ Simplex<String> }
 
 #[allow(unused)]
 impl<T: VertexLabel> Simplex<T> 
@@ -306,6 +309,14 @@ impl<T: VertexLabel> SimplicialCplx<T>
         cplx
     }
 
+    fn get_simplex(&self, cell: &SimplicialCell) -> Simplex<T> {
+        let vertices_labels = (0..cell.size)
+            .filter(|&i| cell.contains( &SimplicialCell::new( i+1, vec![i] )))
+            .map(|i| self.vertices_labeling[i].clone())
+            .collect::<Vec<_>>();
+        Simplex { dim: cell.dim, vertices_labels: vertices_labels }
+    }
+
     pub fn attach(&mut self, simplex: Simplex<T>){
         // add vertices to the complex if necessary
         for v_label in simplex.vertices_labels.iter() {
@@ -462,23 +473,21 @@ mod simplicial_cplx_tests {
 }
 
 
-use algebra::lin_alg::matrix::Matrix;
+use alg::{lin_alg::Matrix, formal_sum_impl};
 
 
 impl<T: VertexLabel> Complex for SimplicialCplx<T> 
 {
-    fn boundary_map(&self) -> Vec<Matrix<i64>> {
-        let mut boundary_maps: Vec<Matrix<i64>> = Vec::new();
-        if self.maximal_cells.is_empty() {
-            return boundary_maps;
-        }
+    type Cell = Simplex<T>;
+    fn boundary_map(&self) -> Vec<( Matrix<i128>, Vec<Self::Cell> )> {
+        let mut boundary_maps: Vec<Matrix<i128>> = vec![Matrix::zero(1,1); self.dim()+1];
+        let mut basis: Vec<Vec<Simplex<T>>> = vec![Vec::new(); self.dim()+1];
 
-        let mut join = self.maximal_cells[0].clone();
-        self.maximal_cells.iter().skip(1).for_each(|maximal_cell| join.join(maximal_cell) );
-        boundary_maps.resize(self.dim()+1, Matrix::zero(1,1));
         let mut n_cells = self.get_i_cells(self.dim(), None);
         // iterating over dimensions
         for n in (1..=self.dim()).rev() {
+            basis[n] = n_cells.iter().map(|cell| self.get_simplex(cell)).collect();
+
             let n_minus_1_cells = self.get_i_cells(n-1, Some(&n_cells));
 
             let mut boundary_map = Matrix::zero(n_minus_1_cells.len(), n_cells.len());
@@ -492,8 +501,8 @@ impl<T: VertexLabel> Complex for SimplicialCplx<T>
                     .enumerate()
                     .filter( |(_, n_minus_1_cell)| boundary.contains(n_minus_1_cell))
                     .for_each(|(i, _)| {
-                        boundary_map.write(i, j, sign);
-                        sign = sign * (-1);
+                        boundary_map[( i, j )] = sign;
+                        sign = -sign;
                 } );
             }
             n_cells = n_minus_1_cells;
@@ -502,8 +511,9 @@ impl<T: VertexLabel> Complex for SimplicialCplx<T>
 
         // for dimension zero
         boundary_maps[0] = Matrix::zero(1, n_cells.len());
+        basis[0] = n_cells.iter().map(|cell| self.get_simplex(cell)).collect();
 
-        println!("boundary_maps: {boundary_maps:?}");
+        let boundary_maps = boundary_maps.into_iter().zip( basis.into_iter() ).collect::<Vec<_>>();
 
         boundary_maps
     }
@@ -520,9 +530,12 @@ mod simpilicial_cplx_space_tests {
         let circle = simplicial_cplx!{
             {"v1", "v2"},
             {"v2", "v3"},
-            {"v3", "v1"}
+            {"v1", "v3"}
         };
-        assert_eq!( H!(circle), "dim 0: Z,\ndim 1: Z,\n" );
+        let h = H!(circle);
+        assert_eq!( h.to_string(), "dim 0: Z,\ndim 1: Z,\n" );
+        assert_eq!( h.cycles[0], vec![ 1*simplex!("v1"), 1*simplex!("v2"), 1*simplex!("v3") ]);
+        assert_eq!( h.cycles[1], vec![ simplex!("v1", "v2") + simplex!("v2", "v3") - simplex!("v1", "v3") ]);
 
 
         // test2: with the sphere (S^2)
@@ -534,7 +547,7 @@ mod simpilicial_cplx_space_tests {
             {"v4", "v2", "v3"},
             {"v4", "v3", "v1"}
         };
-        assert_eq!( H!(sphere), "dim 0: Z,\ndim 1: 0,\ndim 2: Z,\n" );
+        assert_eq!( H!(sphere).to_string(), "dim 0: Z,\ndim 1: 0,\ndim 2: Z,\n" );
 
 
         // test3: with the torus
@@ -558,7 +571,7 @@ mod simpilicial_cplx_space_tests {
             {"v0", "v1", "v6"},
             {"v0", "v4", "v6"}
         };
-        assert_eq!(H!(torus), "dim 0: Z,\ndim 1: Z^2,\ndim 2: Z,\n");
+        assert_eq!(H!(torus).to_string(), "dim 0: Z,\ndim 1: Z^2,\ndim 2: Z,\n");
 
         // test4: with the RP2
         let rp2 = simplicial_cplx!{ 
@@ -573,7 +586,7 @@ mod simpilicial_cplx_space_tests {
             {"2", "3", "5"},
             {"1", "2", "5"}
         };
-        assert_eq!(H!(rp2), "dim 0: Z,\ndim 1: Z_2,\n");
+        assert_eq!(H!(rp2).to_string(), "dim 0: Z,\ndim 1: Z_2,\n");
 
         // test5: with the klein bottle
         let klein_bottle = simplicial_cplx!{ 
@@ -596,6 +609,6 @@ mod simpilicial_cplx_space_tests {
             {"4", "5", "8"},
             {"4", "7", "8"}
         };
-        assert_eq!(H!(klein_bottle), "dim 0: Z,\ndim 1: Z + Z_2,\n");
+        assert_eq!(H!(klein_bottle).to_string(), "dim 0: Z,\ndim 1: Z + Z_2,\n");
     }
 }
