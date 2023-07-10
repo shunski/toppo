@@ -1586,7 +1586,7 @@ impl<T: PID> WeightedSimpleGraph<T> {
 
     pub fn laplacian(self) -> Matrix<T> {
         let mut laplacian = self.data;
-        let n = laplacian.size.0;
+        let n = laplacian.size().0;
         for i in 0..n {
             laplacian[(i,i)] = (0..n).map( |j| laplacian[(i,j)] ).sum();
         }

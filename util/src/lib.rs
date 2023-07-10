@@ -372,14 +372,14 @@ mod labled_set_test {
 }
 
 
-pub struct TupleIterator <'a, T: Copy> {
+pub struct TupleIterator <'a, T> {
     data: &'a[T],
     indeces: Vec<usize>,
     curr_idx: usize,
     is_done: bool,
 }
 
-impl<'a, T: Copy> TupleIterator<'a, T> {
+impl<'a, T> TupleIterator<'a, T> {
     fn new(data: &'a[T], size: usize) -> TupleIterator<'a, T> {
         let indeces = (0..size).collect();
 
@@ -410,16 +410,15 @@ impl<'a, T: Copy> TupleIterator<'a, T> {
     }
 }
 
-impl<'a, T: Copy + std::fmt::Debug> Iterator for TupleIterator<'a, T> {
-    type Item = Vec<T>;
+impl<'a, T: std::fmt::Debug> Iterator for TupleIterator<'a, T> {
+    type Item = Vec<&'a T>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let out;
-        if self.is_done {
+        let out = if self.is_done {
             return None;
         } else {
-            out = Some(self.indeces.iter().map(|&idx| self.data[idx]).collect());
-        }
+            Some(self.indeces.iter().map(|&idx| &self.data[idx]).collect())
+        };
 
         if self.is_blocked() {
             while self.curr_idx > 0 && self.indeces[self.curr_idx]-self.indeces[self.curr_idx-1]==1 {
@@ -444,11 +443,11 @@ impl<'a, T: Copy + std::fmt::Debug> Iterator for TupleIterator<'a, T> {
     }
 }
 
-pub trait TupleIterable <'a, T: Copy> {
+pub trait TupleIterable <'a, T> {
     fn tuple_iter(&'a self, size: usize) -> TupleIterator<'a, T>;
 }
 
-impl<'a, T: Copy> TupleIterable<'a, T> for Vec<T> {
+impl<'a, T> TupleIterable<'a, T> for Vec<T> {
     fn tuple_iter(&'a self, size: usize) -> TupleIterator<'a, T> {
         TupleIterator::new(self, size)
     }
@@ -463,16 +462,16 @@ mod tuple_iterator_test {
     fn init() {
         let v:Vec<usize> = (0..5).collect();
         let mut tuple_iter = v.tuple_iter(3);
-        assert_eq!(tuple_iter.next(), Some(vec![0,1,2]));
-        assert_eq!(tuple_iter.next(), Some(vec![0,1,3]));
-        assert_eq!(tuple_iter.next(), Some(vec![0,1,4]));
-        assert_eq!(tuple_iter.next(), Some(vec![0,2,3]));
-        assert_eq!(tuple_iter.next(), Some(vec![0,2,4]));
-        assert_eq!(tuple_iter.next(), Some(vec![0,3,4]));
-        assert_eq!(tuple_iter.next(), Some(vec![1,2,3]));
-        assert_eq!(tuple_iter.next(), Some(vec![1,2,4]));
-        assert_eq!(tuple_iter.next(), Some(vec![1,3,4]));
-        assert_eq!(tuple_iter.next(), Some(vec![2,3,4]));
+        assert_eq!(tuple_iter.next(), Some(vec![&0, &1, &2]));
+        assert_eq!(tuple_iter.next(), Some(vec![&0, &1, &3]));
+        assert_eq!(tuple_iter.next(), Some(vec![&0, &1, &4]));
+        assert_eq!(tuple_iter.next(), Some(vec![&0, &2, &3]));
+        assert_eq!(tuple_iter.next(), Some(vec![&0, &2, &4]));
+        assert_eq!(tuple_iter.next(), Some(vec![&0, &3, &4]));
+        assert_eq!(tuple_iter.next(), Some(vec![&1, &2, &3]));
+        assert_eq!(tuple_iter.next(), Some(vec![&1, &2, &4]));
+        assert_eq!(tuple_iter.next(), Some(vec![&1, &3, &4]));
+        assert_eq!(tuple_iter.next(), Some(vec![&2, &3, &4]));
         assert_eq!(tuple_iter.next(), None);
 
 

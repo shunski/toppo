@@ -9,7 +9,7 @@ pub trait HomologyWithFieldCoefficients <Coeff: Field> {
             .into_iter()
             .map(|boundary_map| {
                 let im: usize = boundary_map.rank_as_linear_map();
-                let ker: usize = boundary_map.size.1 - im;
+                let ker: usize = boundary_map.size().1 - im;
                 (im, ker)
             })
             .collect();
@@ -45,7 +45,7 @@ impl<T: Complex> IntegralHomology<T>
 
         let mut rank_of_higher_map = 0;
         let mut elem_divisors_of_higher_map: Vec<(i128, usize)> = Vec::new();
-        let mut row_op_of_higher_map = Matrix::<i128>::identity( boundary_maps.last().unwrap().0.size.1 );
+        let mut row_op_of_higher_map = Matrix::<i128>::identity( boundary_maps.last().unwrap().0.size().1 );
         let mut output: Vec<_> = boundary_maps
             .into_iter()
             .rev()
@@ -57,12 +57,12 @@ impl<T: Complex> IntegralHomology<T>
                 // println!("boundary map: {:?}", boundary_map );
                 let (r_op_inv, _, boundary_map, c_op, _) = boundary_map.smith_normal_form();
 
-                let shorter_side = std::cmp::min(boundary_map.size.0, boundary_map.size.1);
+                let shorter_side = std::cmp::min(boundary_map.size().0, boundary_map.size().1);
                 let rank_of_lower_map = match (0..shorter_side).find(|&i| boundary_map[( i,i )]==0) {
                     Some(i) => i,
                     None => shorter_side,
                 };
-                let dim = boundary_map.size.1;
+                let dim = boundary_map.size().1;
 
                 // compute the homology
                 let homology_at_this_dim = Module::new(dim-rank_of_lower_map-rank_of_higher_map, elem_divisors_of_higher_map.clone());

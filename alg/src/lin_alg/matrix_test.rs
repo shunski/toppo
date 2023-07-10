@@ -33,9 +33,7 @@ mod init_test {
              [2, -3, -1]]
         );
 
-        let mut sub = m.sub_mut(1.., 1..);
-        sub[(0,1)] = 10;
-        let sub_sub = sub.sub_mut(.., 0);
+        m[(1,2)] = 10;
         assert_eq!( m, 
             matrix!(i64;
                 [[1,  0,  1],
@@ -43,10 +41,12 @@ mod init_test {
                 [2, -3, -1]]
             )
         );
-        sub_sub.write(
-            matrix!(i64;
+
+        let sub = &mut m[(1.., 1)];
+        sub.write(
+            (&*matrix!(i64;
                 [[4, 5]]
-            ).transpose()
+            )).transpose()
         );
         assert_eq!( m, 
             matrix!(i64;
@@ -71,8 +71,8 @@ mod basic_functionality_test {
         );
         m[(0,1)] = 3;
         assert_eq!(m[(0,1)], 3);
-        assert_eq!(m.sub(0, ..)[(0,1)], 3);
-        assert_eq!(m.sub(0, 1..)[(0,0)], 3);
+        assert_eq!(m[(0, ..)][(0,1)], 3);
+        assert_eq!(m[(0, 1..)][(0,0)], 3);
     }
 
     #[test]
@@ -93,7 +93,7 @@ mod basic_functionality_test {
             [[2, 2],
              [1, -3]]
         );
-        assert_eq!(m.sub(1.., ..2).transpose().as_matrix(), m_sub_t);
+        assert_eq!(m[(1.., ..2)].transpose().as_matrix(), m_sub_t);
     }
 
     fn det2<T: crate::commutative::PID>(m: &Matrix<T>) -> T {
@@ -114,13 +114,15 @@ mod basic_functionality_test {
         // testing for 2 by 2 matrices
         for _ in 0..10 {
             let m = Matrix::<f64>::random(2, 2);
-            assert!( (m.clone().det() - det2(&m)).abs() / det2(&m).abs() < 0.0001, "m={m:?}" );
+            let error = (m.clone().det() - det2(&m)).abs() / det2(&m).abs() * 100.0;
+            assert!( error < 0.00001, "error = {error}& > 0.00001%. m={m:?}. det={}", m.clone().det() );
         }
 
         // testing for 3 by 3 matrices
         for _ in 0..10 {
             let m = Matrix::<f64>::random(3, 3);
-            assert!( (m.clone().det() - det3(&m)).abs() / det3(&m).abs() < 0.0001, "m={m:?}" );
+            let error = (m.clone().det() - det3(&m)).abs() / det3(&m).abs() * 100.0;
+            assert!( error < 0.00001, "error = {error}% > 0.00001%. m={m:?}. det={}", m.clone().det() );
         }
     }
 
@@ -141,7 +143,7 @@ mod basic_functionality_test {
             )
         );
 
-        m.sub_mut(.., 0..2).swap_rows(0, 2);
+        m[(.., 0..2)].swap_rows(0, 2);
         assert_eq!(m,
             matrix!(i64;
                 [[1,  0, -1],
@@ -159,7 +161,7 @@ mod basic_functionality_test {
             )
         );
 
-        m.sub_mut(.., 1..).row_operation(1, 2, -2);
+        m[(.., 1..)].row_operation(1, 2, -2);
         assert_eq!(m,
             matrix!(i64;
                 [[1,  0, -1],
@@ -168,7 +170,8 @@ mod basic_functionality_test {
             )
         );
 
-        m.sub_mut(0, ..2).write( m.sub(0, ..2)*3 + m.sub(1, ..2)*(-2) );
+        let n = &m[(0, ..2)]*3 + &m[(1, ..2)]*(-2);
+        m[(0, ..2)].write_and_move( n );
         assert_eq!(m,
             matrix!(i64;
                 [[-1,  -14, -1],
@@ -195,7 +198,7 @@ mod basic_functionality_test {
             )
         );
 
-        m.sub_mut(0..2, ..).swap_cols(0, 2);
+        m[(0..2, ..)].swap_cols(0, 2);
         assert_eq!(m,
             matrix!(i64;
                 [[ 1,  0,  1],
@@ -213,7 +216,7 @@ mod basic_functionality_test {
             )
         );
 
-        m.sub_mut(1.., ..).col_operation(1, 2, -2);
+        m[(1.., ..)].col_operation(1, 2, -2);
         assert_eq!(m,
             matrix!(i64;
                 [[ 1,   0,  4],
@@ -247,15 +250,15 @@ mod arithmetic_test {
         assert_eq!(m ,ans);
 
         let m1 = matrix!(Rational;
-            [[rational!(-3), rational!(1)],
-             [rational!(5), rational!(0)]]
+            [[rational!(-3), rational!(2; -10)],
+             [rational!(5), rational!(2; 5)]]
         );
         let m2 = matrix!(Rational;
-            [[rational!(0; 1), rational!(1; 5)],
-             [rational!(1; 1), rational!(3; 5)]]
+            [[rational!(4), rational!(1; 5)],
+             [rational!(-5), rational!(3; 5)]]
         );
 
-        assert_eq!(m1*m2, Matrix::identity(2));
+        assert_eq!(m1+m2, Matrix::identity(2));
     }
 
     #[test]
@@ -285,7 +288,7 @@ mod arithmetic_test {
              [rational!(1), rational!(3; 5)]]
         );
 
-        assert_eq!(m1*m2, Matrix::identity(2));
+        assert_eq!(&*m1 * &*m2, Matrix::identity(2));
     }
 }
 
@@ -318,7 +321,7 @@ mod operation_test {
     }
 
     #[test]
-    fn rank_as_linear_map_test() {
+    fn rank() {
         use crate::rational;
 
         let m = Matrix::<Rational>::identity(100);
@@ -413,12 +416,12 @@ mod operation_test {
              [0, 0, 156]]
         );
         assert_eq_up_to_mul_by_unit!(n, ans);
-        assert_eq!(r.clone() * r_inv.clone(), Matrix::identity(3));
-        assert_eq!(c.clone() * c_inv.clone(), Matrix::identity(3));
-        assert_eq!(r.clone() * m.clone() * c.clone(), n.clone());
-        assert_eq!(r_inv.clone() * n * c_inv.clone(), m.clone());
-        assert_eq!(r_inv * r, Matrix::identity(m.size.0));
-        assert_eq!(c_inv * c, Matrix::identity(m.size.1));
+        assert_eq!(&*r * &*r_inv, Matrix::identity(3));
+        assert_eq!(&*c * &*c_inv, Matrix::identity(3));
+        assert_eq!(&*r * &*m * &*c, n);
+        assert_eq!(&*r_inv * &*n * &*c_inv, m);
+        assert_eq!(&*r_inv * &*r, Matrix::identity(m.size().0));
+        assert_eq!(&*c_inv * &*c, Matrix::identity(m.size().1));
 
         // test 2
         let size = (2, 3);
@@ -540,7 +543,7 @@ mod numerical_functionality_test {
     fn random_orthogonal() {
         for i in 1..10 {
             let m = Matrix::random_orthogonal(i);
-            let out = m.sub(..,..).transpose() * m;
+            let out = (&*m).transpose() * &*m;
             assert!( (out - Matrix::identity(i)).frobenius_norm() / (i as f64).sqrt() < 0.0001 );
         }
     }
@@ -583,16 +586,16 @@ mod numerical_functionality_test {
     #[test]
     fn householder_vec() {
         let u = Matrix::random(10, 1);
-        let (v, b) = u.clone().householder_vec();
-        let u = u.sub(.., ..);
-        let v = v.sub(.., ..);
+        let u = &*u;
+        let (v, b) = u.householder_vec();
+        let v = &*v;
         let mut y = u - v * (v.transpose() * u) * b;
         y[(0,0)] -= u.as_matrix().two_norm();
         assert!( y.two_norm() < 0.0001, "y has to be zero, but y={:?}", y );
 
         let u = Matrix::random(10, 1);
         let (v, b) = u.clone().householder_vec();
-        let v = v.sub(.., ..);
+        let v = &*v;
         let p = Matrix::identity(10) - v * v.transpose()* b;
         assert!( (p.clone().det() + 1.0)<0.00001, "p must have det 1, but det(p)={:?}", p.det() );
     }
@@ -648,6 +651,14 @@ mod numerical_functionality_test {
 
     #[test]
     fn spectrum() {
+        let m = matrix!(f64; [[1.0]]);
+        let spectrum = m.spectrum();
+        let ans = matrix!(f64; [[1.0]]);
+        assert!( (spectrum.clone()-ans).two_norm() < 0.00001, 
+            "spectrum must be [1], but spectrum = {:.2}", 
+            spectrum
+        );
+
         let m = matrix!(f64;
             [[3.0, 1.0],
              [2.0, 2.0]]
@@ -685,9 +696,9 @@ mod numerical_functionality_test {
         let (spectrum, eigen_vecs) = m.clone().spectrum_with_invariant_space();
 
         let n = spectrum.size.0;
-        let m = m.sub(..,..);
+        let m = &*m;
 
-        let eigen_vecs = eigen_vecs.sub(..,..);
+        let eigen_vecs = &*eigen_vecs;
         let spectrum_on_diagonal = {
             let mut a = Matrix::zero(n,n);
             (0..n).for_each(|i| a[(i,i)] = spectrum[(i,0)] );
@@ -696,7 +707,7 @@ mod numerical_functionality_test {
         let error = {
             let a = m * eigen_vecs; 
             let b = eigen_vecs * spectrum_on_diagonal;
-            let b = b.sub(..,..);
+            let b = &*b;
             (a-b).frobenius_norm() / b.frobenius_norm() * 100.0
         };
 
@@ -705,6 +716,9 @@ mod numerical_functionality_test {
             error
         );
 
+
+
+
         // testing with larger matries
         let n = 10;
         let diagonal = {
@@ -712,10 +726,10 @@ mod numerical_functionality_test {
             (0..n).for_each( |i| { m[(i,i)] = (i+1) as f64; });
             m
         };
-        let diagonal = diagonal.sub(..,..);
+        let diagonal = &*diagonal;
 
         let shuffle = Matrix::random_orthogonal(n);
-        let shuffle = shuffle.sub(.., ..);
+        let shuffle = &*shuffle;
         let sample = shuffle.transpose() * diagonal * shuffle;
 
         let (spectrum, eigen_vecs) = sample.clone().spectrum_with_invariant_space();
@@ -741,12 +755,12 @@ mod numerical_functionality_test {
 
         let error = {
             let a = sample * eigen_vecs.clone();
-            let b = eigen_vecs * spectrum_on_diagonal;
+            let b = &*eigen_vecs * spectrum_on_diagonal;
             (a-b.clone()).frobenius_norm() / b.frobenius_norm() * 100.0
         };
 
         assert!( error < 0.0001,
-            "Failed on Eigenvectors. Error is {:.5}%, which is greater than 0.0001%.",
+            "Failed on Eigenvectors. Error is {:.5}%, which is greater than 0.0001%. eigen_vectors={eigen_vecs:.5}",
             error
         );
     }

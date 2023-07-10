@@ -31,20 +31,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|(x, _)| x)
             .zip( boundaries.iter().map(|(x, _)| x).skip(1) )
             .map(|(x, y)| {
-                let x = x.sub(..,..);
-                let y = y.sub(..,..);
+                let x = &**x;
+                let y = &**y;
                 // compute the laplacian
                 x.transpose() * x + y * y.transpose()
             } )
             .collect::<Vec<_>>();
 
-        let highest_map = boundaries.last().unwrap().0.sub(..,..);
+        let highest_map = &*boundaries.last().unwrap().0;
         m.push( highest_map.transpose() * highest_map );
 
         let mut n = Vec::new();
         for map in m {
-            let mut real_map = Matrix::zero( map.size.0, map.size.1 );
-            for (i, j) in (0..map.size.0).map(|i| (0..map.size.1).map(move |j| (i,j))).flatten() {
+            let mut real_map = Matrix::zero( map.size().0, map.size().1 );
+            for (i, j) in (0..map.size().0).map(|i| (0..map.size().1).map(move |j| (i,j))).flatten() {
                 real_map[(i,j)] = map[(i,j)] as f64;
             }
             n.push( real_map );
@@ -79,7 +79,7 @@ fn draw( eigenvals: &Vec<Matrix<f64>>, file_name: &str ) -> Result<(), Box<dyn s
             .y_label_area_size(30)
             .margin(2)
             .caption(format!("Spectrum of Dim {}", i), ("sans-serif", 30.0))
-            .build_cartesian_2d((0..data.size.0).into_segmented(), 0f64..12f64)?;
+            .build_cartesian_2d((0..data.size().0).into_segmented(), 0f64..12f64)?;
 
         histogram
             .configure_mesh()
@@ -92,7 +92,7 @@ fn draw( eigenvals: &Vec<Matrix<f64>>, file_name: &str ) -> Result<(), Box<dyn s
         histogram.draw_series(
             Histogram::vertical(&histogram)
                 .style(RED.filled())
-                .data((0..data.size.0).map( |i| (i, data[(i,0)]) )),
+                .data((0..data.size().0).map( |i| (i, data[(i,0)]) )),
         )?;
     }
 
