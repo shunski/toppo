@@ -6,9 +6,11 @@ pub struct Matrix<T: PID> {
     ptr: NonNull<T>,
     _marker: PhantomData<T>,
     
-    pub size: (usize, usize),
+    size: (usize, usize),
     offsets: (usize, usize),
 }
+
+pub struct SubMatrix<T: PID>([T]);
 
 pub mod matrix_impl;
 mod matrix_test;

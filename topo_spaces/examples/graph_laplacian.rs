@@ -109,7 +109,7 @@ fn draw( graph: &WeightedSimpleGraph<f64>, embedding: HashMap<&str, (f64, f64)>,
         .y_label_area_size(30)
         .margin(2)
         .caption("Spectrum", ("sans-serif", 30.0))
-        .build_cartesian_2d((0..eigenvals.size.0).into_segmented(), 0f64..12f64)?;
+        .build_cartesian_2d((0..eigenvals.size().0).into_segmented(), 0f64..12f64)?;
 
     histogram
         .configure_mesh()
@@ -122,12 +122,12 @@ fn draw( graph: &WeightedSimpleGraph<f64>, embedding: HashMap<&str, (f64, f64)>,
     histogram.draw_series(
         Histogram::vertical(&histogram)
             .style(RED.filled())
-            .data((0..eigenvals.size.0).map( |i| (i, eigenvals[(i,0)]) )),
+            .data((0..eigenvals.size().0).map( |i| (i, eigenvals[(i,0)]) )),
     )?;
 
     
     // draw the colored graphs on the right
-    // 'offset' is the dimention of the null space.
+    // 'offset' is the dimension of the null space.
     let offset = (0..).find(|&i| eigenvals[(i,0)].abs() > 0.00001).unwrap();
     let areas_for_graphs = right.split_evenly((2, 4));
     // iterating over the 8 panels in the right...
@@ -137,16 +137,7 @@ fn draw( graph: &WeightedSimpleGraph<f64>, embedding: HashMap<&str, (f64, f64)>,
             .margin(20)
             .build_cartesian_2d(-2.5f64..2.5f64, -2.5f64..2.5f64)?;
 
-        chart.draw_series(
-            graph.vertices().iter()
-                .enumerate()
-                .map(|(i, v)| Circle::new(
-                    *embedding.get(&v[..] ).unwrap(), 
-                    6,
-                    HSLColor( 1.8/3.6 + (eigenvec[(i,2*k+offset)] + 1.0) / 3.0, 0.8, 0.5).filled()
-                ) ),
-        )?;
-
+        // draw lines
         let n = graph.vertices().len();
         let edge_iter = (0..n)
             .map(|i| (0..i).map(move |j| (i,j)))
@@ -160,6 +151,17 @@ fn draw( graph: &WeightedSimpleGraph<f64>, embedding: HashMap<&str, (f64, f64)>,
                 &BLACK,
             ))?;
         }
+
+        // draw points
+        chart.draw_series(
+            graph.vertices().iter()
+                .enumerate()
+                .map(|(i, v)| Circle::new(
+                    *embedding.get(&v[..] ).unwrap(), 
+                    6,
+                    HSLColor( 1.8/3.6 + (eigenvec[(i,2*k+offset)] + 1.0) / 3.0, 0.8, 0.5).filled()
+                ) ),
+        )?;
     }
 
     root.present().expect("");
