@@ -512,6 +512,8 @@ mod operation_test {
 
 #[cfg(test)]
 mod numerical_functionality_test {
+    use rand::random;
+
     use crate::matrix;
     use crate::lin_alg::Matrix;
     #[test]
@@ -763,5 +765,67 @@ mod numerical_functionality_test {
             "Failed on Eigenvectors. Error is {:.5}%, which is greater than 0.0001%. eigen_vectors={eigen_vecs:.5}",
             error
         );
+    }
+
+    #[test]
+    fn givens_rotation() {
+        let a: f64 = random();
+        let b: f64 = random();
+
+        let (x, y) = Matrix::<f64>::givens_rotation(a, b);
+        let zero = a*y+b*x;
+        let one = x*x + y*y;
+        assert!(zero.abs() < 0.0000000001, "a*y+b*x={}", zero);
+        assert!((one-1.0).abs() < 0.0000000001, "x*x+y*y={}", one);
+    }
+
+    #[test]
+    fn householder_tridiagonalization() {
+        let n = 5;
+        let m = Matrix::random_symmetric(n, n);
+        let mut m1 = m.clone();
+        let mut m2 = m.clone();
+
+        m1.householder_tridiagonalization(false);
+        for i in 0..n-2 {
+            for j in i+2..n{
+                m1[(i, j)] = 0.0;
+                m1[(j, i)] = 0.0;
+            }
+        }
+
+        m2.householder_tridiagonalization(true);
+        let q = (0..n-2).map(|i|{
+                let v = &m2[(i+2.., i)];
+                let s = 2.0 / (v.transpose().dot(v)+1.0);
+                {
+                    let mut p = Matrix::identity(n);
+                    p[(i+2.., i+2..)].write(&(((-s)*v)*v.transpose()));
+                    p[(i+2.., i+1)].write(&((-s)*v));
+                    p[(i+1, i+2..)].write(&((-s)*v.transpose()));
+                    p[(i+1, i+1)] = -s;
+                    for j in i+1..n {
+                        p[(j,j)] += 1.0;
+                    }
+                    p
+                }
+            })
+            .fold(Matrix::identity(n), |acc, p| p*acc);
+        let q=&*q;
+        for i in 0..n-2 {
+            for j in i+2..n{
+                m2[(i, j)] = 0.0;
+                m2[(j, i)] = 0.0;
+            }
+        }
+
+        let m1 = &*m1;
+        let m2 = &*m2;
+
+        assert!(((m1-m2).frobenius_norm()/m2.frobenius_norm()).abs()<0.000001, "m1={:.2}, m2={:.2}", m1.as_matrix(), m2.as_matrix());
+        let m = q * m * q.transpose();
+        let m = &*m;
+        assert!((m-m2).frobenius_norm()/m2.frobenius_norm().abs()<0.000001, "m={:.2}, m2={:.2}", m.as_matrix(), m2.as_matrix());
+
     }
 }

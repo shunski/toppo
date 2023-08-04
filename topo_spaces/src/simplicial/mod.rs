@@ -15,8 +15,8 @@ vertex_label_impl!{ String }
 #[derive(Clone, PartialEq, Debug)] 
 pub struct Simplex <T: VertexLabel> 
 {
-    dim: usize,
-    vertices_labels: Vec<T>,
+    pub dim: usize,
+    pub vertices_labels: Vec<T>,
 }
 
 use alg::lin_alg::FormalSum;

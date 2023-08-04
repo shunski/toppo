@@ -169,7 +169,7 @@ impl<T: PID> SubMatrix<T> {
     }
 
     pub fn write(&mut self, m: &SubMatrix<T>) {
-        assert_eq!(self.size(), m.size());
+        assert_eq!(self.size(), m.size(), "cannot write a matrix to a (sub)matrix of different size");
         for i in 0..self.size().0 {
             for j in 0..self.size().1 {
                 self[(i,j)] = m[(i,j)];
@@ -681,6 +681,18 @@ impl<T> Matrix<T>
         }
         out
     }
+
+    pub fn random_symmetric(n: usize, m: usize) -> Matrix<T> {
+        let mut out = Matrix::new(n ,m);
+        let mut rng = rand::thread_rng();
+        for i in 0..out.size().0 {
+            for j in i..out.size().1 {
+                out[(i,j)] = rng.gen();
+                out[(j,i)] = out[(i,j)];
+            }
+        }
+        out
+    }
 }
 
 impl<T: PID> ops::Deref for Matrix<T> {
@@ -1148,6 +1160,24 @@ impl Matrix<f64> {
         }
     }
 
+    pub fn givens_rotation(a: f64, b: f64) -> (f64, f64) {
+        if b.abs()<0.000000000001 {
+            return (1.0, 0.0)
+        }
+
+        if a.abs() < b.abs() {
+            let c = - a/b; 
+            let y = 1.0/((1.0+c*c).sqrt());
+            let x = c*y;
+            (x, y)
+        } else {
+            let c = - b/a; 
+            let x = 1.0/((1.0+c*c).sqrt());
+            let y = c*x;
+            (x,y)
+        }
+    }
+
     pub fn solve(mut self, mut b: Matrix<f64>) -> Self {
         assert_eq!(
             self.size().0, 
@@ -1452,6 +1482,40 @@ impl SubMatrix<f64> {
 
     pub fn qr_with_op(&mut self) -> Matrix<f64> {
         self.raw_qr(true)
+    }
+
+    pub fn householder_tridiagonalization(&mut self, with_op: bool) {
+        let n = self.size().0;
+        for i in 0..n-2 {
+            let (v, b) = self[(i+1.., i)].householder_vec();
+            let v = &*v;
+            let p = (&self[(i+1.., i+1..)] * v) * b;
+            let p = &*p;
+            let w = p - v * b/2.0*(v.transpose().dot(p));
+            let w = &*w;
+            self[(i+1, i)] = self[(i+1.., i)].two_norm();
+            self[(i, i+1)] = self[(i+1, i)];
+            let update = &self[(i+1.., i+1..)] - v*w.transpose() - w*v.transpose();
+            self[(i+1.., i+1..)].write( &*update );
+            if with_op {
+                self[(i+2.., i)].write( &v[(1..,0)] );
+            }
+        }
+    }
+
+
+    pub fn implicit_symmetric_rq_with_wilkinson_shift(&mut self, with_op: bool) {
+        let n = self.size().0;
+        let d = (self[(n-2, n-2)] - self[(n-1, n-1)])/2.0;
+        let sign_d = if d>=0.0 { 1.0 } else { -1.0 };
+        let m = self[(n-1, n-1)]-self[(n-1, n-2)].powi(2)/(d+sign_d*(d*d+self[(n-1, n-2)]));
+        let x = self[(0,0)] - m;
+        let z = self[(1,0)];
+
+        for k in 0..n-1 {
+            let (c,s) = Matrix::<f64>::givens_rotation(x,z);
+            self 
+        }
     }
 }
 

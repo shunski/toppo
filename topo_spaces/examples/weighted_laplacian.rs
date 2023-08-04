@@ -52,10 +52,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ).collect();
 
     let weights: Vec<_> = (0..=cplx.dim()).map( |i| {
-        (1..=n)
-            .map(|t| {
+        (1..=n).map(|t| {
                 let mut m = Matrix::identity( cplx.n_cells_of_dim(i) );
-                if i==2 {
+                if i==1 {
+                    m[(0,0)] /= t as f64;
+                    m[(1,1)] /= t as f64;
+                    m[(2,2)] /= t as f64;
+                } else if i==2 {
                     m[(0,0)] /= t as f64;
                 }
                 m
@@ -84,16 +87,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Matrix::identity(1)
             };
             let w_low = &*w_low;
-            let w_high = if i < boundaries.len()-1 {
-                weights[i+1][t].clone()
+
+            let w = weights[i][t].clone();
+            let w_inv = {
+                let mut m = w.clone();
+                (0..m.size().0).for_each(|i| m[(i,i)]=1.0/m[(i,i)] );
+                m
+            };
+            let w = &*w;
+            let w_inv = &*w_inv;
+
+            let w_high_inv = if i < boundaries.len()-1 {
+                let mut m = weights[i+1][t].clone();
+                (0..m.size().0).for_each(|i| m[(i,i)]=1.0/m[(i,i)] );
+                m
             } else {
                 Matrix::<f64>::identity(1)
             };
-            let w_high = &*w_high;
+            let w_high_inv = &*w_high_inv;
 
             // computation
-            let l_down = b_low.transpose() * w_low * b_low;
-            let l_up = b_high * w_high * b_high.transpose();
+            let l_down = w_inv * b_low.transpose() * w_low * b_low;
+            let l_up = b_high * w_high_inv * b_high.transpose() * w;
             let weighted_laplacian = l_down + l_up;
             let eigenvals = weighted_laplacian.spectrum();
 
@@ -108,9 +123,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = BitMapBackend::new(FILE_NAME, (1024, 768)).into_drawing_area();
     root.fill(&WHITE)?;
     let root = root.margin(5, 5, 5, 5);
-    let n_cols = ((cplx.dim()+1) as f64).sqrt() as usize;
+    let n_cols = ((cplx.dim()+1) as f64 - 0.1).sqrt() as usize + 1;
     let n_rows = cplx.dim()/n_cols + 1;
-    let panels = root.split_evenly((2, 2));
+    let panels = root.split_evenly((n_rows, n_cols));
 
     // iterate over the dimensions (or the panels)
     for (i, panel) in panels.iter().enumerate() {
