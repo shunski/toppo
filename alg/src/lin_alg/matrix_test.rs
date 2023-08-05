@@ -795,22 +795,24 @@ mod numerical_functionality_test {
         }
 
         m2.householder_tridiagonalization(true);
-        let q = (0..n-2).map(|i|{
-                let v = &m2[(i+2.., i)];
-                let s = 2.0 / (v.transpose().dot(v)+1.0);
-                {
-                    let mut p = Matrix::identity(n);
-                    p[(i+2.., i+2..)].write(&(((-s)*v)*v.transpose()));
-                    p[(i+2.., i+1)].write(&((-s)*v));
-                    p[(i+1, i+2..)].write(&((-s)*v.transpose()));
-                    p[(i+1, i+1)] = -s;
-                    for j in i+1..n {
-                        p[(j,j)] += 1.0;
-                    }
-                    p
-                }
-            })
-            .fold(Matrix::identity(n), |acc, p| p*acc);
+        // let q = (0..n-2).map(|i|{
+        //         let v = &m2[(i+2.., i)];
+        //         let s = 2.0 / (v.transpose().dot(v)+1.0);
+        //         {
+        //             let mut p = Matrix::identity(n);
+        //             p[(i+2.., i+2..)].write(&(((-s)*v)*v.transpose()));
+        //             p[(i+2.., i+1)].write(&((-s)*v));
+        //             p[(i+1, i+2..)].write(&((-s)*v.transpose()));
+        //             p[(i+1, i+1)] = -s;
+        //             for j in i+1..n {
+        //                 p[(j,j)] += 1.0;
+        //             }
+        //             p
+        //         }
+        //     })
+        //     .fold(Matrix::identity(n), |acc, p| p*acc);
+        let mut q = Matrix::identity(n);
+        q[(1..,1..)].write( &(m2[(2..,..n-2)].extract_householder_vecs()) );
         let q=&*q;
         for i in 0..n-2 {
             for j in i+2..n{

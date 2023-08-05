@@ -1,4 +1,5 @@
 use crate::commutative::{PID, Field};
+use crate::matrix;
 
 use std::{
     alloc,
@@ -1503,19 +1504,111 @@ impl SubMatrix<f64> {
         }
     }
 
+    pub fn extract_householder_vecs(&self) -> Matrix<f64> {
+        assert_eq!( self.size().0, self.size().1,
+            "Input to this function must be a square matrix."
+        );
+        let n = self.size().0;
 
-    pub fn implicit_symmetric_rq_with_wilkinson_shift(&mut self, with_op: bool) {
+        if n == 1 {
+            let x = self[(0,0)];
+            let s = 2.0/(x*x+1.0);
+            matrix!(f64;
+                [[1.0-s, -s*x],
+                 [-s*x, 1.0-s*x*x]]
+            )
+        } else {
+            let mut m = Matrix::identity(n+1);
+            let v = &self[(..,0)];
+            let s = 2.0 / (v.transpose().dot(v)+1.0);
+            let q = self[(1.., 1..)].extract_householder_vecs();
+            let q = &*q;
+
+            m[(0,0)] = 1.0-s;
+            m[(1..,0)].write(&(q * v *(-s)));
+            m[(0,1..)].write(&(v.transpose()*(-s)));
+            m[(1..,1..)].write(&(q-(q*v)*(v.transpose()*s)));
+            m
+        }
+    }
+
+
+    pub fn implicit_symmetric_rq_with_wilkinson_shift(&mut self, with_op: bool) -> Matrix<f64> {
         let n = self.size().0;
         let d = (self[(n-2, n-2)] - self[(n-1, n-1)])/2.0;
         let sign_d = if d>=0.0 { 1.0 } else { -1.0 };
         let m = self[(n-1, n-1)]-self[(n-1, n-2)].powi(2)/(d+sign_d*(d*d+self[(n-1, n-2)]));
-        let x = self[(0,0)] - m;
-        let z = self[(1,0)];
+        let mut x = self[(0,0)] - m;
+        let mut z = self[(1,0)];
 
-        for k in 0..n-1 {
+        let mut op = Matrix::zero(n-1, 2);
+
+        for i in 0..n-1 {
             let (c,s) = Matrix::<f64>::givens_rotation(x,z);
-            self 
+            let givens =  matrix!(f64; [[c, -s],[s, c]]);
+            let givens = &*givens;
+
+            let j = if i==0 {0} else {i-1};
+            let update = givens.transpose() * &self[(i..i+2, j..j+4)];
+            self[(i..i+2, j..j+4)].write(&update);
+            let update = &self[(j..j+4, i..i+2)] * givens;
+            self[(i..i+2, j..j+4)].write(&update);
+
+            if i < n-2 {
+                x = self[(i+1, i)];
+                z = self[(i+2, i)];
+            }
+
+            if with_op {
+                op[(i,0)] = c;
+                op[(i,1)] = s;
+            }
         }
+        op
+    }
+
+    pub fn symmetric_qr(&mut self, with_op: bool) -> Matrix<f64> {
+        let n = self.size().0;
+        let tolerance = 0.0000000000001;
+        let mut op = Matrix::identity(n);
+        self.householder_tridiagonalization(with_op);
+        if with_op {
+            op = Matrix::identity(n);
+            op[(1..,1..)].write( &(self[(2..,..n-2)].extract_householder_vecs()) );
+        };
+
+        let mut q=0;
+        while q<n {
+            for i in 0..n-1 {
+                if self[(i+1,i)].abs()<tolerance{
+                    self[(i+1, i)] = 0.0;
+                    self[(i, i+1)] = 0.0;
+                }
+            }
+
+            q = (0..n-2)
+                .find( |&i| self[(n-i-1,n-i-2)].abs()>tolerance && self[(n-i-2,n-i-3)].abs()>tolerance )
+                .unwrap_or(n);
+
+            let p = (1..n-q)
+                .rev()
+                .find(|&i| self[(i,i-1)].abs()<tolerance )
+                .unwrap_or(0);
+
+            if q<n {
+                debug_assert!( (n-q)-p > 2);
+                let givens = self.implicit_symmetric_rq_with_wilkinson_shift(with_op);
+                if with_op {
+                    for (i, c,s) in (0..givens.size.0).map(|i| (i, givens[(i,0)], givens[(i,1)])) {
+                        let givens =  matrix!(f64; [[c, -s],[s, c]]);
+                        let givens = &*givens;
+                        let update = givens * &op[(i..i+2, ..)];
+                        op[(i..i+2, ..)].write(&update);
+                    }
+                }
+            }
+        }
+        op
     }
 }
 
