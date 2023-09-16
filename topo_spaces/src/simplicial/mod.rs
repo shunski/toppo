@@ -9,7 +9,7 @@ macro_rules! vertex_label_impl {
     )*)
 }
 
-vertex_label_impl!{ String }
+vertex_label_impl!{ String usize }
 
 #[allow(unused)]
 #[derive(Clone, PartialEq, Debug)] 

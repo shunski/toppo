@@ -447,7 +447,7 @@ pub trait TupleIterable <'a, T> {
     fn tuple_iter(&'a self, size: usize) -> TupleIterator<'a, T>;
 }
 
-impl<'a, T> TupleIterable<'a, T> for Vec<T> {
+impl<'a, T> TupleIterable<'a, T> for [T] {
     fn tuple_iter(&'a self, size: usize) -> TupleIterator<'a, T> {
         TupleIterator::new(self, size)
     }

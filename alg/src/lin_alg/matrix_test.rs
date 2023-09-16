@@ -781,7 +781,7 @@ mod numerical_functionality_test {
 
     #[test]
     fn householder_tridiagonalization() {
-        let n = 5;
+        let n = 20;
         let m = Matrix::random_symmetric(n, n);
         let mut m1 = m.clone();
         let mut m2 = m.clone();
@@ -795,22 +795,6 @@ mod numerical_functionality_test {
         }
 
         m2.householder_tridiagonalization(true);
-        // let q = (0..n-2).map(|i|{
-        //         let v = &m2[(i+2.., i)];
-        //         let s = 2.0 / (v.transpose().dot(v)+1.0);
-        //         {
-        //             let mut p = Matrix::identity(n);
-        //             p[(i+2.., i+2..)].write(&(((-s)*v)*v.transpose()));
-        //             p[(i+2.., i+1)].write(&((-s)*v));
-        //             p[(i+1, i+2..)].write(&((-s)*v.transpose()));
-        //             p[(i+1, i+1)] = -s;
-        //             for j in i+1..n {
-        //                 p[(j,j)] += 1.0;
-        //             }
-        //             p
-        //         }
-        //     })
-        //     .fold(Matrix::identity(n), |acc, p| p*acc);
         let mut q = Matrix::identity(n);
         q[(1..,1..)].write( &(m2[(2..,..n-2)].extract_householder_vecs()) );
         let q=&*q;
@@ -828,6 +812,246 @@ mod numerical_functionality_test {
         let m = q * m * q.transpose();
         let m = &*m;
         assert!((m-m2).frobenius_norm()/m2.frobenius_norm().abs()<0.000001, "m={:.2}, m2={:.2}", m.as_matrix(), m2.as_matrix());
-
     }
+
+    #[test]
+    fn spectrum_symmetric() {
+        let d = matrix!(f64;
+            [[-0.2,  0.0, 0.0],
+             [ 0.0,  0.1, 0.0],
+             [ 0.0,  0.0, 0.5]]
+        );
+        let q = Matrix::random_orthogonal(3);
+        let m = (&*q).transpose() * d * q;
+        println!("m={m:.3}");
+        let spectrum = m.spectrum_symmetric();
+        let ans = matrix!(f64; [[-0.2], [0.1], [0.5]]);
+        let error = (spectrum.clone()-ans.clone()).two_norm() / ans.clone().two_norm() * 100.0;
+        assert!( error < 0.0001, 
+            "spectrum must be [-0.2, 0.1, 0.5].transpose(), but spectrum = {:.4} and the error = {}%.", 
+            spectrum,
+            error
+        );
+    }
+
+    #[test] 
+    fn spectrum_with_invariant_space_symmetric() {
+        // testing with larger matries
+        let n = 10;
+        let diagonal = {
+            let mut m = Matrix::zero(n,n);
+            (0..n).for_each( |i| { m[(i,i)] = (i+1) as f64; });
+            m
+        };
+        let diagonal = &*diagonal;
+
+        let shuffle = Matrix::random_orthogonal(n);
+        let shuffle = &*shuffle;
+        let sample = shuffle.transpose() * diagonal * shuffle;
+
+        let (spectrum, eigen_vecs) = sample.clone().spectrum_with_invariant_space_symmetric();
+
+        // evaluation of spectrum
+        let error = {
+            let mut clone = spectrum.clone();
+            (0..n).for_each( |i| clone[(i,0)] -= diagonal[(i,i)] );
+            clone.two_norm() / diagonal.frobenius_norm() * 100.0
+        };
+
+        assert!( error < 0.0001,
+            "error is {:.5}%, which is greater than 0.0001%. the spectrum = {:.3}.",
+            error, spectrum
+        );
+
+        // evaluation of eigenvectors
+        let spectrum_on_diagonal = {
+            let mut a = Matrix::zero(n,n);
+            (0..n).for_each(|i| a[(i,i)] = spectrum[(i,0)] );
+            a
+        };
+
+        let error = {
+            let a = sample * eigen_vecs.clone();
+            let b = &*eigen_vecs * spectrum_on_diagonal;
+            (a-b.clone()).frobenius_norm() / b.frobenius_norm() * 100.0
+        };
+
+        assert!( error < 0.0001,
+            "Failed on Eigenvectors. Error is {:.5}%, which is greater than 0.0001%. eigen_vectors={eigen_vecs:.5}",
+            error
+        );
+    }
+
+    #[test] 
+    fn spectrum_with_n_smallest_eigenvecs_symmetric() {
+        // testing with larger matries
+        let n = 10;
+        let diagonal = {
+            let mut m = Matrix::zero(n,n);
+            (0..n).for_each( |i| { m[(i,i)] = (i+1) as f64; });
+            m
+        };
+        let diagonal = &*diagonal;
+
+        let shuffle = Matrix::random_orthogonal(n);
+        let shuffle = &*shuffle;
+        let sample = shuffle.transpose() * diagonal * shuffle;
+
+        let (spectrum, eigen_vecs) = sample.clone().spectrum_with_n_smallest_eigenvecs_symmetric(3);
+
+        // evaluation of spectrum
+        let error = {
+            let mut clone = spectrum.clone();
+            (0..n).for_each( |i| clone[(i,0)] -= diagonal[(i,i)] );
+            clone.two_norm() / diagonal.frobenius_norm() * 100.0
+        };
+
+        assert!( error < 0.0001,
+            "error is {:.5}%, which is greater than 0.0001%. the spectrum = {:.3}.",
+            error, spectrum
+        );
+
+        // evaluation of eigenvectors
+        let spectrum_on_diagonal = {
+            let mut a = Matrix::zero(n,n);
+            (0..n).for_each(|i| a[(i,i)] = spectrum[(i,0)] );
+            a
+        };
+
+        let error = {
+            let a = sample * eigen_vecs.clone();
+            let b = &*eigen_vecs * &spectrum_on_diagonal[(..3, ..3)];
+            (a-b.clone()).frobenius_norm() / b.frobenius_norm() * 100.0
+        };
+
+        assert!( error < 0.0001,
+            "Failed on Eigenvectors. Error is {:.5}%, which is greater than 0.0001%. eigen_vectors={eigen_vecs:.5}",
+            error
+        );
+    }
+
+    // #[test]
+    // fn lanzos_tridiagonalization() {
+    //     // let n = 100;
+    //     // let m = Matrix::random_sparse_symmetric(n, n);
+    //     let m = matrix!(f64;
+    //         [[ 1.0, 1.0,-1.0],
+    //          [ 1.0, 0.0, 0.0],
+    //          [-1.0, 0.0, 2.0]]
+    //     );
+
+    //     let (a,b,q) = m.lanzos_tridiagonalization();
+
+    //     let ans = {
+    //         let mut ans = Matrix::zero(a.size().0,a.size().0);
+    //         for i in 0..a.size().0 {
+    //             ans[(i,i)] = a[(i, 0)];
+    //             if i<a.size().0-1 {
+    //                 ans[(i,i+1)] = b[(i, 0)];
+    //                 ans[(i+1,i)] = b[(i, 0)];
+    //             }
+    //         }
+    //         ans
+    //     };
+    //     let ans = &*ans;
+
+    //     let explicit_ans = matrix!(f64;
+    //         [[         1.0, 2_f64.sqrt(), 0.0],
+    //          [2_f64.sqrt(),        1.0, 1.0],
+    //          [         0.0,        1.0, 1.0]]
+    //     );
+    //     let explicit_ans = &*explicit_ans;
+
+    //     let error = (ans-explicit_ans).frobenius_norm()/explicit_ans.frobenius_norm();
+    //     assert!(error < 0.00001, "ans={:.3}, which is different from {:.3}.",
+    //         ans.as_matrix(),
+    //         explicit_ans.as_matrix()
+    //     );
+
+    //     let m = (&*q).transpose() * m * &*q;
+    //     let m = &*m;
+    //     let error = (m-ans).frobenius_norm()/ans.frobenius_norm().abs();
+    //     assert!(error<0.0001, "error={:.3}%, m={:.2}, ans={:.2}", error, m.as_matrix(), ans.as_matrix());
+
+
+    //     // test 2
+    //     let n = 20;
+    //     let m = Matrix::random_symmetric(n, n);
+
+    //     let (a,b,q) = m.lanzos_tridiagonalization();
+
+    //     let ans = {
+    //         let mut ans = Matrix::zero(a.size().0,a.size().0);
+    //         for i in 0..a.size().0 {
+    //             ans[(i,i)] = a[(i, 0)];
+    //             if i<a.size().0-1 {
+    //                 ans[(i,i+1)] = b[(i, 0)];
+    //                 ans[(i+1,i)] = b[(i, 0)];
+    //             }
+    //         }
+    //         ans
+    //     };
+    //     let ans = &*ans;
+
+    //     let m = (&*q).transpose() * m * &*q;
+    //     let m = &*m;
+
+    //     println!("'ans' has size {:?}", ans.size());
+    //     println!("'m' has size {:?}", m.size());
+    //     let error = (m-ans).frobenius_norm()/ans.frobenius_norm().abs();
+    //     // assert!(error<0.0001, "error={:.3}%, m={:.2}, ans={:.2}", error, m.as_matrix(), ans.as_matrix());
+    //     assert!(error<0.0001);
+    // }
+
+    // // #[test] 
+    // fn extremal_spectrum_symmetric() {
+    //     let n = 10;
+    //     let diagonal = {
+    //         let mut m = Matrix::zero(n,n);
+    //         (0..n).for_each( |i| { m[(i,i)] = (i+1) as f64; });
+    //         m
+    //     };
+    //     let diagonal = &*diagonal;
+
+    //     let shuffle = Matrix::random_orthogonal(n);
+    //     let shuffle = &*shuffle;
+    //     let sample = shuffle.transpose() * diagonal * shuffle;
+
+    //     let (spectrum, eigen_vecs) = sample.clone().extremal_spectrum_symmetric(2, true);
+
+    //     // evaluation of spectrum
+    //     let (error, ans) = {
+    //         let ans = {
+    //             let mut ans = Matrix::zero(2, 1);
+    //             (0..2).for_each( |i| ans[(i,0)] = diagonal[(i,i)] );
+    //             ans
+    //         };
+    //         let mut clone = spectrum.clone();
+    //         clone -= &*ans;
+    //         (clone.two_norm() / diagonal.frobenius_norm() * 100.0, ans)
+    //     };
+
+    //     assert!( error < 0.0001,
+    //         "error is {:.5}%, which is greater than 0.0001%. The spectrum = {:.3}^T, but the computed result is {:.3}^T.",
+    //         error, ans.transpose(), spectrum.transpose()
+    //     );
+
+    //     // evaluation of eigenvectors
+    //     let spectrum_on_diagonal = {
+    //         let mut a = Matrix::zero(n,n);
+    //         (0..n).for_each(|i| a[(i,i)] = spectrum[(i,0)] );
+    //         a
+    //     };
+
+    //     let error = {
+    //         let a = sample * eigen_vecs.clone();
+    //         let b = &*eigen_vecs * &spectrum_on_diagonal[(..3, ..3)];
+    //         (a-b.clone()).frobenius_norm() / b.frobenius_norm() * 100.0
+    //     };
+
+    //     assert!( error < 0.0001,
+    //         "Failed on Eigenvectors. Error is {:.5}%, which is greater than 0.0001%. eigen_vectors={eigen_vecs:.5}",
+    //         error
+    //     );
+    // }
 }
