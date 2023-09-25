@@ -4,6 +4,4 @@ Cargo.lock
 
 combinatorial_laplacian.png
 
-output.jpg
-
-graph_laplacian.png
+geom/test_output/
