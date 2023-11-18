@@ -608,3 +608,193 @@ mod symmetric_action_test {
         assert_eq!( v, vec![0,1,8,9,2,3,4,5,6,7] );
     }
 }
+
+
+fn permutation_mul_impl(out: &mut [usize], p1: &[usize], p2: &[usize]) {
+    for i in 0..out.len() {
+        out[i] = p1[p2[i]]
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ConstPermutation<const N: usize>([usize; N]);
+
+impl<const N: usize> std::ops::Mul for ConstPermutation<N> {
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self::Output {
+        let mut out = [0; N];
+        permutation_mul_impl(&mut out, &self.0, &rhs.0);
+        Self(out)
+    }
+}
+
+impl<const N: usize> std::ops::MulAssign for ConstPermutation<N> {
+    fn mul_assign(&mut self, rhs: Self) {
+        let mut out = [0; N];
+        permutation_mul_impl(&mut out, &self.0, &rhs.0);
+        *self = Self(out)
+    }
+}
+
+impl<const N: usize> std::iter::Product for ConstPermutation<N> {
+    fn product<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::identity(), |accum ,x| x * accum )
+    }
+}
+
+impl<const N: usize> std::convert::From<[usize; N]> for ConstPermutation<N> {
+    fn from(a: [usize; N]) -> Self {
+        Self(a)
+    }
+}
+
+impl<const N: usize> Group for ConstPermutation<N> {
+    fn identity() -> Self {
+        let mut out = [0; N];
+        (0..N).for_each(|i| out[i]=i );
+        ConstPermutation(out)
+    }
+
+    fn inverse(self) -> Self {
+        let mut out = [0; N];
+        let mut curr = 0;
+        while curr != 0 {
+            out[self.0[curr]] = curr;
+            curr = self.0[curr];
+        }
+        ConstPermutation(out)
+    }
+
+    fn inverse_of_gen(self) -> Self {
+        self.inverse()
+    }
+}
+
+impl<const N: usize> ConstPermutation<N> {
+    pub fn order(self) -> usize {
+        let mut order = 1;
+        let mut power = self;
+        let id = Self::identity();
+        
+        while power != id {
+            power *= self;
+            order += 1;
+        }
+        
+        order
+    }
+}
+
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct VecPermutation(Vec<usize>);
+
+impl std::ops::Mul for VecPermutation {
+    type Output = Self;
+    fn mul(mut self, mut rhs: Self) -> Self::Output {
+        // Adjust the size of the smaller permutation so that it has the same length as the larger one
+        let (small, large) = if self.0.len() < rhs.0.len() { 
+            (&mut self.0, &mut rhs.0)
+        } else {
+            (&mut rhs.0, &mut self.0)
+        };
+        small.reserve(large.len() - small.len());
+        while small.len() < large.len() {
+            small.push(small.len());
+        }
+        // Now the size of both permutation should be equal
+        debug_assert!(self.0.len() == rhs.0.len());
+
+
+
+        let mut out = vec![0; self.0.len()];
+        permutation_mul_impl(&mut out, &self.0, &rhs.0);
+        Self(out)
+    }
+}
+
+impl std::ops::MulAssign for VecPermutation {
+    fn mul_assign(&mut self, mut rhs: Self) {
+        // Adjust the size of the smaller permutation so that it has the same length as the larger one
+        let (small, large) = if self.0.len() < rhs.0.len() { 
+            (&mut self.0, &mut rhs.0)
+        } else {
+            (&mut rhs.0, &mut self.0)
+        };
+        small.reserve(large.len() - small.len());
+        while small.len() < large.len() {
+            small.push(small.len());
+        }
+        // Now the size of both permutation should be equal
+        debug_assert!(self.0.len() == rhs.0.len());
+
+        let mut out = vec![0; self.0.len()];
+        permutation_mul_impl(&mut out, &self.0, &rhs.0);
+        *self = Self(out)
+    }
+}
+
+impl std::iter::Product for VecPermutation {
+    fn product<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::identity(), |accum ,x| x * accum )
+    }
+}
+
+impl<const N: usize> std::convert::From<[usize; N]> for VecPermutation {
+    fn from(a: [usize; N]) -> Self {
+        Self(Vec::from(a))
+    }
+}
+
+
+impl<const N: usize> std::convert::From<ConstPermutation<N>> for VecPermutation {
+    fn from(a: ConstPermutation<N>) -> Self {
+        Self(Vec::from(a.0))
+    }
+}
+
+
+impl Group for VecPermutation {
+    fn identity() -> Self {
+        Self(Vec::new())
+    }
+
+    fn inverse(self) -> Self {
+        let mut out = vec![0; self.0.len()];
+        let mut curr = 0;
+        while curr != 0 {
+            out[self.0[curr]] = curr;
+            curr = self.0[curr];
+        }
+        Self(out)
+    }
+
+    fn inverse_of_gen(self) -> Self {
+        self.inverse()
+    }
+}
+
+impl VecPermutation {
+    pub fn order(self) -> usize {
+        let mut order = 1;
+        let mut power = self.clone();
+        let id = Self::identity();
+        
+        while power != id {
+            power *= self.clone();
+            order += 1;
+        }
+        
+        order
+    }
+}
+
+impl VecPermutation {
+    pub fn eval(&self, index: usize) -> usize {
+        if index < self.0.len() {
+            self.0[index]
+        } else {
+            index
+        }
+    }
+}

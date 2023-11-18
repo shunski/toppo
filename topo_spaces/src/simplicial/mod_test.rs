@@ -165,7 +165,7 @@ mod simpilicial_cplx_space_tests {
 
         let boundary_map = circle.boundary_map();
         let b0 = Matrix::zero(1,3);
-        let b1 = matrix!(i128;
+        let b1 = matrix!(i64;
             [[ 1, 0, 1],
              [-1, 1, 0],
              [ 0,-1,-1]]
@@ -181,13 +181,13 @@ mod simpilicial_cplx_space_tests {
         };
         let boundary_map = square.boundary_map();
 
-        let b1 = matrix!(i128;
+        let b1 = matrix!(i64;
             [[ 1, 1, 0, 1, 0],
              [-1, 0, 1, 0, 1],
              [ 0,-1,-1, 0, 0],
              [ 0, 0, 0,-1,-1]]
         );
-        let b2 = matrix!(i128;
+        let b2 = matrix!(i64;
             [[ 1, 1],
              [-1, 0],
              [ 1, 0],

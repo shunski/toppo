@@ -1,7 +1,7 @@
 use alg::commutative::Field;
-use alg::lin_alg::{Module, FormalSum, Matrix};
+use alg::lin_alg::{Module, Vector, Matrix};
 
-pub trait HomologyWithFieldCoefficients <Coeff: Field> {
+pub trait HomologyWithFieldCoefficients <Coeff: Field + Copy> {
     fn homology(&self) -> Vec<usize> {
         let boundary_maps: Vec<Matrix<Coeff>> = self.get_boundary_map();
         if boundary_maps.is_empty() { return Vec::new(); }
@@ -30,22 +30,23 @@ pub trait HomologyWithFieldCoefficients <Coeff: Field> {
 
 #[allow(unused)]
 pub struct IntegralHomology<T: Complex> {
-    homology: Vec<Module<i128>>,
-    cycles: Vec<Vec<FormalSum<T::Cell>>>,
-    boundaries: Vec<Vec<FormalSum<T::Cell>>>,
+    homology: Vec<Module<i64>>,
+    cycles: Vec<Vec<Vector<i64, T::Cell>>>,
+    boundaries: Vec<Vec<Vector<i64, T::Cell>>>,
 }
 
 
 impl<T: Complex> IntegralHomology<T> 
-    where i128: std::ops::Mul<T::Cell, Output = FormalSum<T::Cell>> + std::ops::Mul<FormalSum<T::Cell>, Output = FormalSum<T::Cell>>
+    where 
+        i64: std::ops::Mul<T::Cell, Output = Vector<i64, T::Cell>>
 {
     pub fn new(cplx: &T, max_dim: Option<usize>) -> Self {
         let boundary_maps = cplx.boundary_map();
         assert!( !boundary_maps.is_empty() );
 
         let mut rank_of_higher_map = 0;
-        let mut elem_divisors_of_higher_map: Vec<(i128, usize)> = Vec::new();
-        let mut row_op_of_higher_map = Matrix::<i128>::identity( boundary_maps.last().unwrap().0.size().1 );
+        let mut elem_divisors_of_higher_map: Vec<(i64, usize)> = Vec::new();
+        let mut row_op_of_higher_map = Matrix::<i64>::identity( boundary_maps.last().unwrap().0.size().1 );
         let mut output: Vec<_> = boundary_maps
             .into_iter()
             .rev()
@@ -81,7 +82,7 @@ impl<T: Complex> IntegralHomology<T>
                             i -= elem_divisors_of_higher_map[idx].1;
                             idx+=1;
                         }
-                        elem_divisors_of_higher_map[idx].0 * x
+                        x * elem_divisors_of_higher_map[idx].0
                     } )
                     .collect();
                 
@@ -137,7 +138,7 @@ impl<T: Complex> IntegralHomology<T>
 
 
 impl<T: Complex> IntegralHomology<T> 
-    where i128: std::ops::Mul<T::Cell, Output = FormalSum<T::Cell>>, T::Cell: Display
+    where i64: std::ops::Mul<T::Cell, Output = Vector<i64, T::Cell>>, T::Cell: Display + Ord
 {
     pub fn get_description_of_cycles(&self) -> String {
         let mut out = String::new();
@@ -165,8 +166,8 @@ impl<T: Complex> IntegralHomology<T>
 
 
 pub trait Complex {
-    type Cell: Clone + PartialEq;
-    fn boundary_map (&self) -> Vec< (Matrix<i128>, Vec<Self::Cell>) >;
+    type Cell: Clone + PartialEq + PartialOrd;
+    fn boundary_map (&self) -> Vec< (Matrix<i64>, Vec<Self::Cell>) >;
 }
 
 use std::fmt::Display;

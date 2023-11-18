@@ -1,0 +1,10 @@
+[package]
+name = "analysis"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand = "*"
+plotters = "*"
+util = { path = "../util" }
+alg = { path = "../alg" }

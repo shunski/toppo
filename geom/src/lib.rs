@@ -1,86 +1,75 @@
-use alg::{lin_alg::Matrix, lin_alg::SubMatrix, matrix};
+use alg::lin_alg::{ConstVector, ConstMatrix};
 use util::TupleIterable;
 
 
 #[derive(Clone, Copy, PartialEq)]
-struct Sphere<'a> {
+struct Sphere {
     radius: f64,
-    center: &'a SubMatrix<f64>,
+    center: ConstVector<f64, 2>,
 }
 
-impl Sphere<'_> {
-    fn contains(&self, p: &SubMatrix<f64>) -> bool {
-        (p - &*self.center).two_norm() < self.radius
+impl Sphere {
+    fn contains(&self, p: ConstVector<f64, 2>) -> bool {
+        (p - self.center).two_norm() < self.radius
     }
 }
 
 
 #[derive(Clone, Copy, PartialEq)]
-pub struct Triangle<'a>([&'a SubMatrix<f64>; 3]);
+pub struct Triangle([ConstVector<f64, 2>; 3]);
 
-impl Triangle<'_> {
-    fn circum_circle_contains(&self, p: &SubMatrix<f64>) -> bool {
-        let orthogonal = |mut m: Matrix<f64>| {
-            let tmp = m[(0,0)];
-            m[(0,0)] = -m[(1,0)];
-            m[(1,0)] = tmp;
+impl Triangle {
+    fn circum_circle_contains(&self, p: ConstVector<f64, 2>) -> bool {
+        let orthogonal = |mut m: ConstVector<f64, 2>| {
+            let tmp = m[0];
+            m[0] = -m[1];
+            m[1] = tmp;
             m
         };
-        let inverse = |m: &SubMatrix<f64>| {
-            let det = m[(0,0)] * m[(1,1)] - m[(1,0)] * m[(0,1)];
-            let inverse = matrix!(f64;
-                [[ m[(1,1)], -m[(0,1)]],
-                 [-m[(1,0)],  m[(0,0)]]]
+        let inverse = |m: ConstMatrix<f64, 2, 2>| {
+            let det = m[0][0] * m[1][1] - m[1][0] * m[0][1];
+            let inverse = ConstMatrix::from(
+                [[ m[1][1], -m[0][1]],
+                 [-m[1][0],  m[0][0]]]
             ) / det;
-            debug_assert!( (m* &*inverse-Matrix::identity(2)).frobenius_norm()/2_f64.sqrt()*100.0< 0.000000001 );
             inverse
         };
         let a = self.0[0] + (self.0[1]-self.0[0]) / 2.0;
         let b = orthogonal( self.0[1]-self.0[0] );
         let c = self.0[0] + (self.0[2]-self.0[0]) / 2.0;
         let d = orthogonal( self.0[2]-self.0[0] );
-
-        let a = &*a; let b = &*b; let c = &*c; let d = &*d; 
         
-        let mut m = Matrix::zero(2, 2);
-        m[(..,0)].write( b );
-        m[(..,1)].write( &(d*(-1.0)) );
-        let t = inverse(&m)[(0,..)].dot( &(c-a) );
+        let m = ConstMatrix::from([b, d*(-1.0)]);
+        let t = inverse(m)[0][0] * (c-a)[0] + inverse(m)[0][1] * (c-a)[1];
 
         let center = a + b*t;
-        let center = &*center;
         let radius = (self.0[0] - center).two_norm();
-
-        debug_assert!({
-            let s = inverse(&m)[(1,..)].dot( &(c-a) );
-            (center - (c+d*s)).two_norm()/(center).two_norm()*100.0 < 0.0000000001
-        });
 
         Sphere { radius, center }.contains(p)
     }
 }
 
-pub fn delaunay_triangulation(points: &[Matrix<f64>]) -> (Vec<Triangle<'_>>, Vec<[usize; 3]>) {
+pub fn delaunay_triangulation(points: &[ConstVector<f64, 2>]) -> (Vec<Triangle>, Vec<[usize; 3]>) {
     let original_points = {
         let center = points.iter()
-            .fold(Matrix::zero(2,1), |accum, x| accum+&**x )
+            .fold(ConstVector::<f64, 2>::zero(), |accum, x| accum+*x )
             / points.len() as f64;
         let r = points.iter()
-            .map(|p| (&**p-&*center).two_norm())
+            .map(|p| (*p-center).two_norm())
             .max_by(|p, q| p.partial_cmp(q).unwrap())
             .unwrap()
              + 1_f64;
-        let p1 = &*center + matrix!(f64; [[0.0], [2.0*r]]);
-        let p2 = &*center + matrix!(f64; [[ 3_f64.sqrt()*r], [-r]]);
-        let p3 = &*center + matrix!(f64; [[-3_f64.sqrt()*r], [-r]]);
+        let p1 = center + ConstVector::<f64, 2>::from( [0_f64, 2.0*r] );
+        let p2 = center + ConstVector::<f64, 2>::from( [3_f64.sqrt()*r, -r] );
+        let p3 = center + ConstVector::<f64, 2>::from( [-3_f64.sqrt()*r, -r] );
         [p1,p2,p3]
     };
     
     let index = |i: usize| {
         if i<points.len(){
-            &points[i]
+            points[i]
         } else {
-            &original_points[i-points.len()]
+            original_points[i-points.len()]
         }
     };
 
@@ -90,8 +79,8 @@ pub fn delaunay_triangulation(points: &[Matrix<f64>]) -> (Vec<Triangle<'_>>, Vec
     for i in 0..points.len() {
         let mut bad_triangles = Vec::new();
         for &t in &triangulation {
-            let triangle = Triangle([&index(t[0]), &index(t[1]), &index(t[2])]);
-            if triangle.circum_circle_contains(&points[i]) {
+            let triangle = Triangle([index(t[0]), index(t[1]), index(t[2])]);
+            if triangle.circum_circle_contains(points[i]) {
                 bad_triangles.push( t );
             }
         }
@@ -125,7 +114,7 @@ pub fn delaunay_triangulation(points: &[Matrix<f64>]) -> (Vec<Triangle<'_>>, Vec
     let mut out = Vec::new();
     for t in triangulation.iter() {
         assert!(t[0]!=t[1] && t[0]!=t[2] && t[1]!=t[2] );
-        out.push( Triangle([&points[t[0]], &points[t[1]], &points[t[2]]]) );
+        out.push( Triangle([points[t[0]], points[t[1]], points[t[2]]]) );
     }
 
     (out, triangulation)
@@ -133,7 +122,7 @@ pub fn delaunay_triangulation(points: &[Matrix<f64>]) -> (Vec<Triangle<'_>>, Vec
 
 #[cfg(test)]
 mod geom_test {
-    use alg::{lin_alg::Matrix, matrix};
+    use alg::lin_alg::ConstVector;
     use plotters::prelude::*;
     use rand::prelude::*;
 
@@ -142,15 +131,15 @@ mod geom_test {
     #[test]
     fn circum_circle_contains() {
         let triangle = [
-            matrix!(f64; [[0.0], [0.0]]),
-            matrix!(f64; [[2.0], [0.0]]),
-            matrix!(f64; [[0.1], [1.0]])
+            ConstVector::<f64, 2>::from( [0.0, 0.0] ),
+            ConstVector::<f64, 2>::from( [2.0, 0.0] ),
+            ConstVector::<f64, 2>::from( [0.1, 1.0] )
         ];
-        let triangle = Triangle([&triangle[0], &triangle[1], &triangle[2]]);
-        assert!( triangle.circum_circle_contains( &matrix!(f64; [[1.0], [0.0]]) ));
-        assert!( triangle.circum_circle_contains( &matrix!(f64; [[0.5], [0.5]]) ));
-        assert!(!triangle.circum_circle_contains( &matrix!(f64; [[2.2], [0.0]]) ));
-        assert!(!triangle.circum_circle_contains( &matrix!(f64; [[1.0], [-1.2]]) ));
+        let triangle = Triangle([triangle[0], triangle[1], triangle[2]]);
+        assert!( triangle.circum_circle_contains( ConstVector::<f64, 2>::from( [1.0, 0.0]) ));
+        assert!( triangle.circum_circle_contains( ConstVector::<f64, 2>::from( [0.5, 0.5]) ));
+        assert!(!triangle.circum_circle_contains( ConstVector::<f64, 2>::from( [2.2, 0.0]) ));
+        assert!(!triangle.circum_circle_contains( ConstVector::<f64, 2>::from( [1.0, -1.2]) ));
     }
 
     #[test]
@@ -159,13 +148,13 @@ mod geom_test {
 
         let mut rng = rand::thread_rng();
         let points: Vec<_> = (0..n)
-            .map(|_| matrix!(f64; [[rng.gen_range(0.0..1.0)], [rng.gen_range(0.0..1.0)]]) )
+            .map(|_| ConstVector::<f64, 2>::from( [rng.gen_range(0.0..1.0), rng.gen_range(0.0..1.0)]) )
             .collect();
 
         let (triangulation, triangle_indeces) = super::delaunay_triangulation(&points);
 
         for triangle in &triangulation {
-            assert!( points.iter().filter(|p| triangle.circum_circle_contains(p)).count() <= 3 );
+            assert!( points.iter().filter(|p| triangle.circum_circle_contains(**p)).count() <= 3 );
         }
 
         assert!(!triangulation.is_empty());
@@ -180,12 +169,12 @@ mod geom_test {
 
         // draw vertices
         graphic.draw_series( points.iter()
-            .map(|v| Circle::new((v[(0,0)], v[(1,0)]), 4, BLACK.filled()))
+            .map(|v| Circle::new((v[0], v[1]), 4, BLACK.filled()))
         )?;
 
         // draw edges
         for triangle in triangulation {
-            let mut triangle: Vec<_> = triangle.0.iter().map(|v| (v[(0,0)], v[(1,0)])).collect();
+            let mut triangle: Vec<_> = triangle.0.iter().map(|v| (v[0], v[1])).collect();
             triangle.push(triangle[0]);
             graphic.draw_series(LineSeries::new(
                 triangle.into_iter(),

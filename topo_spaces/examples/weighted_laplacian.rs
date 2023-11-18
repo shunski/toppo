@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let boundaries = cplx.boundary_map();
 
     // a little closure to convert integral matrices to real matrices
-    let to_real = { |m: &SubMatrix<i128>| {
+    let to_real = { |m: &SubMatrix<i64>| {
             let mut real_map = Matrix::zero( m.size().0, m.size().1 );
             for (i, j) in (0..m.size().0).map(|i| (0..m.size().1).map(move |j| (i,j))).flatten() {
                 real_map[(i,j)] = m[(i,j)] as f64;

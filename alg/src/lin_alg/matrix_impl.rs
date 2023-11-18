@@ -1,6 +1,7 @@
 use crate::commutative::{PID, Field};
 use crate::matrix;
 
+use std::fmt::{Display, Debug};
 use std::{
     alloc,
     marker::PhantomData,
@@ -133,14 +134,14 @@ impl<T: PID> SubMatrix<T> {
             rhs.size().0
         );
 
-        (0..self.size().1).map(|i| self[(0, i)] * rhs[(i,0)]).sum()
+        (0..self.size().1).map(|i| self[(0, i)].clone() * rhs[(i,0)].clone()).sum()
     }
 
     pub fn as_matrix(&self) -> Matrix<T> {
         let mut out = Matrix::new(self.size().0, self.size().1);
         for i in 0..self.size().0 {
             for j in 0..self.size().1 {
-                out[(i,j)] = self[(i, j)];
+                out.write( (i,j), self[(i, j)].clone() );
             }
         }
 
@@ -149,35 +150,35 @@ impl<T: PID> SubMatrix<T> {
 
     pub fn swap_rows(&mut self, r1: usize, r2: usize) {
         for j in 0..self.size().1 {
-            let tmp = self[(r1, j)];
-            self[(r1, j)] = self[(r2, j)];
+            let tmp = self[(r1, j)].clone();
+            self[(r1, j)] = self[(r2, j)].clone();
             self[(r2, j)] = tmp;
         }
     }
 
     pub fn swap_cols(&mut self, c1: usize, c2: usize) {
         for i in 0..self.size().0 {
-            let tmp = self[(i, c1)];
-            self[(i, c1)] = self[(i, c2)];
+            let tmp = self[(i, c1)].clone();
+            self[(i, c1)] = self[(i, c2)].clone();
             self[(i, c2)] = tmp;
         }
     }
 
     pub fn row_operation(&mut self, r1: usize, r2: usize, scalar: T) {
         let r2 = &self[(r2, ..)] * scalar;
-        (0..self.size().1).for_each(|i| self[(r1, i)] += r2[(0, i)]);
+        (0..self.size().1).for_each(|i| self[(r1, i)] += r2[(0, i)].clone());
     }
 
     pub fn col_operation(&mut self, c1: usize, c2: usize, scalar: T) {
         let c2 = &self[(.., c2)] * scalar;
-        (0..self.size().0).for_each(|j| self[(j, c1)] += c2[(j, 0)]);
+        (0..self.size().0).for_each(|j| self[(j, c1)] += c2[(j, 0)].clone());
     }
 
     pub fn write(&mut self, m: &SubMatrix<T>) {
         assert_eq!(self.size(), m.size(), "cannot write a matrix to a (sub)matrix of different size");
         for i in 0..self.size().0 {
             for j in 0..self.size().1 {
-                self[(i,j)] = m[(i,j)];
+                self[(i,j)] = m[(i,j)].clone();
             }
         }
     }
@@ -338,7 +339,7 @@ macro_rules! submatrix_add_sub_impl {
                 let mut out = Matrix::new(self.size().0, self.size().1);
                 for i in 0..self.size().0 {
                     for j in 0..self.size().1 {
-                        out[(i,j)] = $bin_op_tr::$bin_op_fn(self[(i,j)], rhs[(i,j)]);
+                        out[(i,j)] = $bin_op_tr::$bin_op_fn(self[(i,j)].clone(), rhs[(i,j)].clone());
                     }
                 }
                 out
@@ -359,7 +360,7 @@ macro_rules! submatrix_add_sub_assign_impl {
 
                 for i in 0..self.size().0 {
                     for j in 0..self.size().1 {
-                        $bin_op_tr::$bin_op_fn(&mut self[(i,j)], rhs[(i,j)]);
+                        $bin_op_tr::$bin_op_fn(&mut self[(i,j)], rhs[(i,j)].clone());
                     }
                 };
             }
@@ -373,7 +374,7 @@ macro_rules! submatrix_add_sub_assign_impl {
 
                 for i in 0..self.size().0 {
                     for j in 0..self.size().1 {
-                        $bin_op_tr::$bin_op_fn(&mut self[(i,j)], rhs[(i,j)]);
+                        $bin_op_tr::$bin_op_fn(&mut self[(i,j)], rhs[(i,j)].clone());
                     }
                 };
             }
@@ -489,7 +490,7 @@ impl<T: PID> ops::Mul<T> for &SubMatrix<T> {
         let mut out = Matrix::new(self.size().0, self.size().1);
         for i in 0..out.size().0 {
             for j in 0..out.size().1 {
-                out[(i,j)] = self[(i,j)] * rhs;
+                out[(i,j)] = self[(i,j)].clone() * rhs.clone();
             }
         };
         out
@@ -515,7 +516,7 @@ impl<T: Field> ops::Div<T> for &SubMatrix<T> {
         let mut out = Matrix::new(self.size().0, self.size().1);
         for i in 0..out.size().0 {
             for j in 0..out.size().1 {
-                out[(i,j)] = self[(i,j)] / rhs;
+                out[(i,j)] = self[(i,j)].clone() / rhs.clone();
             }
         };
         out
@@ -527,7 +528,7 @@ impl<T: PID> ops::MulAssign<T> for SubMatrix<T> {
     fn mul_assign(&mut self, rhs: T) {
         for i in 0..self.size().0 {
             for j in 0..self.size().1{
-                self[(i,j)] *= rhs;
+                self[(i,j)] *= rhs.clone();
             }
         }
     }
@@ -543,7 +544,7 @@ impl<T: Field> ops::DivAssign<T> for SubMatrix<T> {
     fn div_assign(&mut self, rhs: T) {
         for i in 0..self.size().0 {
             for j in 0..self.size().1{
-                self[(i,j)] /= rhs;
+                self[(i,j)] /= rhs.clone();
             }
         };
     }
@@ -663,7 +664,7 @@ impl<T: PID> Matrix<T> {
         let mut out = Matrix::new(size.0, size.1);
         for i in 0..size.0 {
             for j in 0..size.1 {
-                out[(i, j)] = v[i][j];
+                out[(i, j)] = v[i][j].clone();
             }
         }
 
@@ -676,6 +677,10 @@ impl<T: PID> Matrix<T> {
         (self.size.1, self.offsets.1) = tmp;
 
         self
+    }
+
+    fn write(&mut self, (i,j): (usize, usize), val: T) {
+        unsafe{ std::ptr::write( self.ptr().add(i*self.offsets().0 + j*self.offsets().1 ), val); }
     }
 }
 
@@ -702,7 +707,7 @@ impl<T> Matrix<T>
         for i in 0..out.size().0 {
             for j in i..out.size().1 {
                 out[(i,j)] = rng.gen();
-                out[(j,i)] = out[(i,j)];
+                out[(j,i)] = out[(i,j)].clone();
             }
         }
         out
@@ -748,13 +753,13 @@ impl<T: PID> Clone for Matrix<T> {
     }
 }
 
-impl<T: PID + std::fmt::Debug + std::fmt::Display> fmt::Debug for SubMatrix<T> {
+impl<T: PID + std::fmt::Debug> fmt::Debug for SubMatrix<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "\n")?;
         for i in 0..self.size().0 {
             write!(f, "| ")?;
             for j in 0..self.size().1 {
-                write!(f, "{}", self[(i,j)])?;
+                write!(f, "{:?}", self[(i,j)])?;
                 if j != self.size().1-1 {
                     write!(f, "\t")?;
                 }
@@ -765,9 +770,15 @@ impl<T: PID + std::fmt::Debug + std::fmt::Display> fmt::Debug for SubMatrix<T> {
     }
 }
 
-impl<T: PID + std::fmt::Debug + std::fmt::Display> fmt::Debug for Matrix<T> {
+impl<T: PID + std::fmt::Display> fmt::Display for Matrix<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        (**self).fmt(f)
+        Display::fmt(&(**self), f)
+    }
+}
+
+impl<T: PID + std::fmt::Debug> fmt::Debug for Matrix<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&(**self), f)
     }
 }
 
@@ -785,24 +796,27 @@ macro_rules! vector {
     };
 }
 
-#[allow(unused)]
 impl <T: PID> Matrix<T> {
     pub fn zero(n: usize, m: usize) -> Self {
+        assert!(n>0 && m>0, "the size of the matrix must be a pair positive integers but size=({n}, {m}).");
         let mut out = Matrix::new(n, m);
-        for i in 0..out.size().0 {
-            for j in 0..out.size().1 {
-                out[(i, j)] = T::zero();
+        for i in 0..n {
+            for j in 0..m {
+                out.write((i,j), T::zero());
             }
         }
         out
     }
 
     pub fn identity(size: usize) -> Self {
+        assert!(size>0 , "the size of the identity matrix must be a positive integer but size={size}).");
         let mut mat = Matrix::zero(size, size);
         (0..size).for_each(|i| mat[(i,i)] = T::one());
         mat
     }
-    
+}
+
+impl <T: PID+Debug+Display+Copy> Matrix<T> {
     pub fn smith_normal_form(mut self) -> (Self, Self, Self, Self, Self) {
         use crate::commutative::bezout_identity;
 
@@ -868,7 +882,7 @@ impl <T: PID> Matrix<T> {
         // }
 
         // now run the general algorithm
-        while( i < self.size().0 && j < self.size().1) {
+        while i < self.size().0 && j < self.size().1 {
             // choosing a pivot
             j = match (j..self.size().1).find(|&l| (i..self.size().0).any(|k| self[(k, l)] != T::zero()) ){
                 Some(l) => l,
@@ -1060,7 +1074,7 @@ impl <T: PID> Matrix<T> {
 }
 
 #[allow(unused)]
-impl <T:Field> Matrix<T> {
+impl <T:Field+Copy> Matrix<T> {
     pub fn rank_as_linear_map(&self) -> usize {
         let mut clone = self.clone();
         let shorter_side = std::cmp::min(self.size().0, self.size().1);
@@ -1101,18 +1115,18 @@ impl <T:Field> Matrix<T> {
 }
 
 
-use super::FormalSum;
+use super::Vector;
 // Change of basis
-impl<Basis> ops::Mul<Vec<Basis>> for Matrix<i128> 
-    where Basis: Clone + PartialEq, i128: ops::Mul<Basis, Output = FormalSum<Basis>>
+impl<Basis> ops::Mul<Vec<Basis>> for Matrix<i64> 
+    where Basis: Clone + PartialEq + PartialOrd, i64: ops::Mul<Basis, Output = Vector<i64, Basis>>
 {
-    type Output = Vec<FormalSum<Basis>>;
+    type Output = Vec<Vector<i64, Basis>>;
 
     fn mul(self, rhs: Vec<Basis>) -> Self::Output {
         assert!(self.size().1==rhs.len(), "Multiplication failed: dimensions do not match: the left has size {:?} but the right has size {}", self.size, rhs.len());
         let mut out = Vec::new();
         for i in 0..self.size().0 {
-            out.push( (0..self.size().1).map(|j| self[(i, j)]*rhs[j].clone() ).sum::<FormalSum<_>>() );
+            out.push( (0..self.size().1).map(|j| self[(i, j)]*rhs[j].clone() ).sum::<Vector<_, _>>() );
         }
         out
     }
@@ -1170,6 +1184,79 @@ impl Matrix<f64> {
             }
         }
         out
+    }
+
+    pub fn gram_schmidt(mut self) -> Matrix<f64> {
+        // Normalize the first colmnn
+        let factor = self[(..,0)].two_norm();
+        self[(..,0)] /= factor;
+
+        for i in 1..self.size().1 {
+            for j in 0..i {
+                let update = &self[(..,i)] - &self[(..,j)] * (self[(..,i)].transpose().dot(&self[(..,j)]));
+                self[(..,i)].write( &update );
+            }
+            let factor = self[(..,i)].two_norm();
+            self[(..,i)] /= factor;
+        }
+
+        self
+    }
+
+    pub fn gram_schmidt_without_normalize(mut self) -> Matrix<f64> {
+        for i in 1..self.size().1 {
+            for j in 0..i {
+                let update = &self[(..,i)] - &self[(..,j)] * (self[(..,i)].transpose().dot(&self[(..,j)])) / (self[(..,j)].transpose().dot(&self[(..,j)]));
+                self[(..,i)].write( &update );
+            }
+        }
+
+        self
+    }
+
+    fn gram_schmidt_coeff_update(&mut self, basis: &Matrix<f64>, orthogonal_basis: &Matrix<f64>) {
+        for i in 0..basis.size().1 {
+            for j in 0..i {
+                self[(i,j)] = basis[(..,i)].transpose().dot(&orthogonal_basis[(..,j)])
+                    / orthogonal_basis[(..,j)].transpose().dot(&orthogonal_basis[(..,j)]);
+            }
+        }
+    }
+
+    pub fn lll_lattice_reduce(mut self, delta: f64) -> Matrix<f64> {
+        assert!(self.size().0 >= self.size().1, "input basis invalid.");
+        assert!(0.25 < delta && delta < 1.0, "'delta' must satisfy 0.25 < 'delta' < 1.0, but it is 'delta'");
+
+        let mut orthogonal_basis = self.clone().gram_schmidt_without_normalize();
+        let mut gram_schmidt_coeff = Self::zero(self.size().1, self.size().1);
+        gram_schmidt_coeff.gram_schmidt_coeff_update(&self, &orthogonal_basis);
+
+        let mut i = 1;
+        while i < self.size().1 {
+            for j in (0..i).rev() {
+                if gram_schmidt_coeff[(i,j)].abs() <= 0.5 { continue; }
+
+                let update = &self[(..,i)] - &self[(..,j)] * gram_schmidt_coeff[(i,j)].round();
+                self[(..,i)].write( &update );
+
+                // ToDo: change the following code so that it does the necessary updates only.
+                orthogonal_basis = self.clone().gram_schmidt_without_normalize();
+                gram_schmidt_coeff.gram_schmidt_coeff_update(&self, &orthogonal_basis)
+            }
+
+            let i_norm_squared = orthogonal_basis[(..,i)].transpose().dot( &orthogonal_basis[(..,i)] );
+            let i_minus_1_norm_squared = orthogonal_basis[(..,i-1)].transpose().dot( &orthogonal_basis[(..,i-1)] );
+            if i_norm_squared > i_minus_1_norm_squared * (delta - gram_schmidt_coeff[(i,i-1)].powi(2)) {
+                i = i+1;
+            } else {
+                self.swap_cols(i-1, i);
+                orthogonal_basis = self.clone().gram_schmidt_without_normalize();
+                gram_schmidt_coeff.gram_schmidt_coeff_update(&self, &orthogonal_basis);
+                i = std::cmp::max(i-1, 1);
+            }
+        }
+
+        self
     }
 
     pub fn householder_vec(mut self) -> (Matrix<f64>, f64) {
@@ -2000,7 +2087,7 @@ impl SubMatrix<f64> {
     // }
 }
 
-impl std::fmt::Display for Matrix<f64> {
+impl<T: PID+Display> std::fmt::Display for SubMatrix<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let decimals = f.precision().unwrap_or(3);
         write!(f, "\n")?;

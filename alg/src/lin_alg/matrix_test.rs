@@ -96,11 +96,11 @@ mod basic_functionality_test {
         assert_eq!(m[(1.., ..2)].transpose().as_matrix(), m_sub_t);
     }
 
-    fn det2<T: crate::commutative::PID>(m: &Matrix<T>) -> T {
+    fn det2<T: crate::commutative::PID + Copy>(m: &Matrix<T>) -> T {
         m[(0,0)]*m[(1,1)] - m[(0,1)]*m[(1,0)]
     }
 
-    fn det3<T: crate::commutative::PID>(m: &Matrix<T>) -> T {
+    fn det3<T: crate::commutative::PID + Copy>(m: &Matrix<T>) -> T {
         m[(0,0)]*m[(1,1)]*m[(2,2)]
          + m[(0,1)]*m[(1,2)]*m[(2,0)]
          + m[(0,2)]*m[(1,0)]*m[(2,1)]
@@ -515,7 +515,7 @@ mod numerical_functionality_test {
     use rand::random;
 
     use crate::matrix;
-    use crate::lin_alg::Matrix;
+    use crate::lin_alg::{Matrix, SubMatrix};
     #[test]
     fn norms() {
         let v = matrix!(f64;
@@ -548,6 +548,83 @@ mod numerical_functionality_test {
             let out = (&*m).transpose() * &*m;
             assert!( (out - Matrix::identity(i)).frobenius_norm() / (i as f64).sqrt() < 0.0001 );
         }
+    }
+
+    #[test]
+    fn gram_schmidt() {
+        let size = 50;
+        let m = Matrix::random(size, size);
+        let m = m.gram_schmidt();
+        for i in 0..size {
+            assert!((m[(..,i)].two_norm() - 1.0 ).abs() < 0.0000000001, "columns do not have norm one.");
+        }
+        for i in 0..size {
+            for j in i+1..size {
+                assert!(m[(..,i)].transpose().dot( &m[(..,j)] ).abs() < 0.0000000001 , "{i}-th column and the {j}-th column are not orthogonal: m[(..,{i})]^T={:.5}, but m[(..,{j})]^T={:.5}", &m[(..,i)].transpose().as_matrix(), &m[(..,j)].transpose().as_matrix() );
+            }
+        }
+    }
+
+    #[test]
+    fn gram_schmidt_without_normalize() {
+        let size = 50;
+        let m = Matrix::random(size, size);
+        let m = m.gram_schmidt_without_normalize();
+        for i in 0..size {
+            for j in i+1..size {
+                assert!(m[(..,i)].transpose().dot( &m[(..,j)] ).abs() < 0.001 , "{i}-th column and the {j}-th column are not orthogonal: m[(..,{i})]^T={:.5}, but m[(..,{j})]^T={:.5}", &m[(..,i)].transpose().as_matrix(), &m[(..,j)].transpose().as_matrix() );
+            }
+        }
+    }
+
+    fn is_lll_reduced(m: &SubMatrix<f64>, delta: f64) {
+
+        let o = m.as_matrix().gram_schmidt_without_normalize();
+        let mut gram_schmidt_coeffs = vec![f64::INFINITY; m.size().1-1];
+
+        for i in 1..m.size().1 {
+            for j in 0..i {
+                let c = m[(..,i)].transpose().dot(&o[(..,j)]) / o[(..,j)].transpose().dot(&o[(..,j)]);
+                assert!( c <= 0.5, "{i} th basis and the {j} th basis are not nearly orthogonal: {:.4}", m.as_matrix());
+
+                if i-j==1 {
+                    gram_schmidt_coeffs[j] = c;
+                }
+            }
+        }
+
+        for i in 0..m.size().1 - 1 {
+            let i_th_norm_squared = o[(..,i)].transpose().dot(&o[(..,i)]);
+            let i_plus_one_th_norm_squared = o[(..,i+1)].transpose().dot(&o[(..,i+1)]);
+
+            assert!( delta * i_th_norm_squared
+                <= i_plus_one_th_norm_squared + gram_schmidt_coeffs[i].powi(2) * i_th_norm_squared,
+                "Lovasz condition failed at {i} and {} th basis", i+1
+            );
+        }
+    }
+
+    #[test]
+    fn lll_lattice_reduce() {
+        let m = matrix!(f64; 
+            [[1.0, -1.0, 3.0],
+             [1.0,  0.0, 5.0],
+             [1.0,  2.0, 6.0]]
+        );
+        let delta = 0.75;
+
+        let out = m.lll_lattice_reduce(delta);
+
+        is_lll_reduced(&out, delta);
+
+        // test 2
+        let size = 10;
+        let m = Matrix::random(2*size, size);
+        let delta = 0.75;
+
+        let out = m.lll_lattice_reduce(delta);
+
+        is_lll_reduced(&out, delta);
     }
 
     #[test]
