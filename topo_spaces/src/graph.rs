@@ -1,10 +1,14 @@
 use alg::permutation;
 use util::BinaryPool;
 use alg::commutative::{PID, Rational};
-use alg::lin_alg::Matrix;
+use alg::lin_alg::{Matrix, ConstVector};
 use alg::rational;
+use std::collections::HashMap;
 use std::fmt;
 use alg::non_commutative::{permutation::*, Group};
+use crate::cubical::Cube;
+use std::collections::VecDeque;
+use crate::cubical::EdgePath;
 
 #[allow(unused)]
 #[derive(Clone)]
@@ -119,7 +123,7 @@ macro_rules! graph {
             $(
                 v.push(($v1.to_string(), $v2.to_string()));
             )*
-            crate::graph::Graph::<i64>::from(v)
+            graph::Graph::<i64>::from(v)
         }
     };
 
@@ -145,7 +149,9 @@ macro_rules! graph {
 }
 
 
+#[cfg(test)]
 mod graph_test {
+    use crate::graph;
     #[test]
     fn init_test() {
         // test 1
@@ -197,12 +203,12 @@ mod graph_test {
 }
 
 #[allow(unused)]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct VertexVector {
-    start: String,
-    end: String,
-    direction: usize,
-    pos: Rational,
+    pub start: String,
+    pub end: String,
+    pub direction: usize,
+    pub pos: Rational,
 }
 
 #[allow(unused)]
@@ -223,7 +229,7 @@ impl fmt::Display for VertexVector {
 }
 
 #[allow(unused)]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum SimpleVertex {
     Essential(String),
     Redundant(VertexVector),
@@ -255,7 +261,7 @@ impl RawSimpleGraph {
         }
     }
 
-    // function returing the raw index for self.data. The condition that i < j is required.
+    // function returning the raw index for self.data. The condition that i < j is required.
     fn raw_idx(i: usize, j: usize) -> usize {
         debug_assert!(i < j, "The condition i < j is required, but not satisfied: i={} but j={}", i, j);
         j*(j-1)/2 + i
@@ -304,7 +310,7 @@ impl RawSimpleGraph {
         edges_to_delete.iter().for_each(|&(i, j)| self.remove_edge(i, j) );
     }
 
-    fn degree_of(&self, idx: usize) -> usize {
+    pub fn degree_of(&self, idx: usize) -> usize {
         if idx >= self.n_vertices() { panic!(); };
 
         (0..self.n_vertices())
@@ -340,6 +346,88 @@ impl RawSimpleGraph {
                     new_vertices.push(w);
                 }
             });
+        }
+    }
+
+    pub fn get_adjacent_vertices(&self, v: usize) -> Vec<usize> {
+        self.adjacent_vertices_iter(v).collect()
+    }
+
+    fn get_edge_path_recc<const FORWARD: bool>(&self, end_cube: &mut Cube, path: &mut VecDeque<[usize; 2]>) {
+        let smallest_unblocked = end_cube
+            .iter()
+            .enumerate()
+            .filter(|&(_, &x)| !x.is_blocked(&end_cube, &self))
+            .min_by(|(_, x), (_,y)| x.cmp(y) );
+
+        let (idx, &smallest_unblocked) = if let Some(x) = smallest_unblocked {
+            x
+        } else {
+            return;
+        };
+
+        let new_vertex = smallest_unblocked.flow(&self).terminal();
+        end_cube[idx] = new_vertex;
+
+        if FORWARD {
+            let edge = [smallest_unblocked.vertex(), new_vertex.vertex()];
+            path.push_back(edge);
+        } else {
+            let edge = [new_vertex.vertex(), smallest_unblocked.vertex()];
+            path.push_front(edge);
+        }
+
+        // run the algorithm recursively
+        self.get_edge_path_recc::<FORWARD>(end_cube, path);
+    }
+
+    pub fn get_edge_path(&self, c: Cube) -> EdgePath {
+        // let edge = c.0.iter().find(|&&f| f.is_edge() ).unwrap().edge();
+        // if self.factor_pool.maximal_tree_contains(edge) {
+        //     self.get_edge_path_of_edge_in_maximal_tree(c) 
+        // } else {
+        //     self.get_edge_path_of_edge_not_in_maximal_tree(c)
+        // }
+        
+        
+        let mut start = Cube::from(c.iter().map(|f| match f {
+            CubeFactor::Vertex(_) => *f,
+            CubeFactor::Edge([_, x]) => CubeFactor::Vertex(*x),
+        }).collect::<Vec<_>>());
+
+        let mut end = Cube::from(c.iter().map(|f| match f {
+            CubeFactor::Vertex(_) => *f,
+            CubeFactor::Edge([x, _]) => CubeFactor::Vertex(*x),
+        }).collect::<Vec<_>>());
+
+        let critical_edge = c.iter().find(|f| f.is_edge()).unwrap().edge();
+        let critical_edge = [critical_edge[1], critical_edge[0]];
+
+        let mut path = VecDeque::from([critical_edge]);
+        self.get_edge_path_recc::<false>(&mut start, &mut path);
+        self.get_edge_path_recc::<true>(&mut end, &mut path);
+
+        let path = EdgePath::from( 
+            path.into_iter().map(|e| vec![e]).collect::<Vec<_>>() 
+        ).reduce_to_geodesic();
+
+        path
+    }
+
+    pub fn get_edge_path_to_from_base_pt(&self, mut c: Cube, to_not_from: bool) -> EdgePath {
+        assert!(c.iter().all(|f| f.is_vertex() ));
+
+        let mut path = VecDeque::new();
+        self.get_edge_path_recc::<true>(&mut c, &mut path);
+        
+        let path = EdgePath::from(
+            path.into_iter().map(|e| vec![e]).collect::<Vec<_>>() 
+        ).reduce_to_geodesic();
+        
+        if to_not_from {
+            path 
+        } else {
+            path.inverse()
         }
     }
 }
@@ -715,7 +803,7 @@ impl RawSimpleGraph {
     }
 
     fn choose_base_point(&mut self) -> Permutation {
-        // -- if the vertex 0 is of degree one, we can just let this point to be the base point
+        // -- if the vertex 0 is of degree one, we can just let it be the base point
         if self.degree_of(0) != 1 {
             // -- otherwise, we want an essential vertex v such that the graph with v deleted is connected.
             for i in 0..self.n_vertices() {
@@ -793,7 +881,7 @@ impl RawSimpleGraph {
             let mut start = i+1;
             let mut branches: Vec<_> = (i+2..self.n_vertices())
                 .filter(|&j| self.contains(i,j) )
-                .filter(|&j| self.maximal_tree_contains(i,j) )
+                .filter(|&j| self.maximal_tree_contains([i,j]) )
                 .map(|j| { 
                     let range = start..j;
                     let i_j_is_separating = (0..i).any(|k| (start..j).any(|l| self.contains(k, l)));
@@ -832,7 +920,7 @@ impl RawSimpleGraph {
         return p;
     }
 
-    fn maximal_tree_contains(&self, i: usize, j: usize ) -> bool {
+    pub fn maximal_tree_contains(&self, [i, j]: [usize; 2]) -> bool {
         if !self.is_maximal_tree_chosen { panic!("Trying to access the maximal tree, but the tree is not chosen yet.") };
 
         if !self.contains(i, j) { return false; };
@@ -884,7 +972,7 @@ mod maximal_tree_test {
         graph.adjacent_vertices_iter(i)
             .filter(|&j| j>i)
             .filter(|&j| graph.contains(i, j))
-            .take_while(|&j| graph.maximal_tree_contains(i, j))
+            .take_while(|&j| graph.maximal_tree_contains([i, j]))
             .for_each(|j| {
                 record_of_vertices.push(j);
                 check_maximality_and_uniqueness_of_zero_cell_recc(graph, j, record_of_vertices);
@@ -1091,12 +1179,37 @@ impl SimpleGraph {
         subdivided_graph
     }
 
-    pub fn n_vertices(&self) -> usize{
+    pub fn n_vertices(&self) -> usize {
         self.vertices_list.len()
     }
 
-    pub fn n_essential_vertices(&self) -> usize{
+    pub fn n_essential_vertices(&self) -> usize {
         self.n_essential_vertices
+    }
+
+    pub fn modify_embedding<const N: usize>(&self, embedding: HashMap<String, ConstVector<f64, N>>) -> HashMap<SimpleVertex, ConstVector<f64,N>> {
+        assert_eq!( self.n_essential_vertices(), embedding.len() );
+
+        let mut out = HashMap::new();
+
+        for v in self.vertices_list.iter() {
+            match v {
+                SimpleVertex::Essential(s) => out.insert(v.clone(), *embedding.get(s).unwrap()),
+                SimpleVertex::Redundant(s) => {
+                    let start = *embedding.get(&s.start).unwrap();
+                    let end = *embedding.get(&s.end).unwrap();
+                    let ratio: f64 = s.pos.into();
+                    let pos = start + (end - start) * ratio;
+                    out.insert(v.clone(), pos)
+                },
+            };
+        }
+
+        out
+    }
+
+    pub fn vertices_list(&self) -> &[SimpleVertex] {
+        &self.vertices_list
     }
 }
 
@@ -1113,6 +1226,7 @@ impl std::ops::Deref for SimpleGraph {
 mod simple_graph_test {
     use crate::graph::RawSimpleGraph;
     use super::SimpleGraph;
+    use crate::graph;
     #[test]
     fn init_test() {
         let graph = graph!{
@@ -1166,7 +1280,7 @@ impl fmt::Display for SimpleGraph {
         write!(f, "\n")?;
 
         write!(f, "edges: ")?;
-        for (i, (v, w)) in self.edge_iter().map(|e| e.edge()).enumerate() {
+        for (i, [v, w]) in self.edge_iter().map(|e| e.edge()).enumerate() {
             // printing each cell
             write!(f, "[{}, {}]", self.vertices_list[v], self.vertices_list[w])?;
             if i != self.n_edges()-1 {
@@ -1192,30 +1306,30 @@ impl Index<usize> for SimpleGraph {
 
 #[derive(Eq, PartialEq, Clone, Copy, Ord, Debug)]
 pub enum CubeFactor {
-    Edge(usize, usize),
+    Edge([usize; 2]),
     Vertex(usize)
 }
 
 impl CubeFactor {
     pub fn is_disjoint_from(self, other: Self) -> bool {
         match (self, other) {
-            (Self::Edge(w,x), Self::Edge(y,z)) => w != y && w != z && x != y && x != z,
-            (Self::Vertex(x), Self::Edge(y,z)) =>  x != y && x != z,
-            (Self::Edge(x, y), Self::Vertex(z)) =>  x != z && y != z,
+            (Self::Edge([w,x]), Self::Edge([y,z])) => w != y && w != z && x != y && x != z,
+            (Self::Vertex(x), Self::Edge([y,z])) =>  x != y && x != z,
+            (Self::Edge([x, y]), Self::Vertex(z)) =>  x != z && y != z,
             (Self::Vertex(x), Self::Vertex(y)) =>  x != y
         }
     }
 
     pub fn is_in_maximal_tree(self, graph: &RawSimpleGraph) -> bool {
         match self {
-            Self::Edge(x, y) => graph.maximal_tree_contains(x, y),
+            Self::Edge([x, y]) => graph.maximal_tree_contains([x, y]),
             Self::Vertex(_) => true,
         }
     }
 
     pub fn is_edge(self) -> bool {
         match self {
-            Self::Edge(_, _) => true,
+            Self::Edge([_, _]) => true,
             Self::Vertex(_) => false,
         }
     }
@@ -1224,29 +1338,29 @@ impl CubeFactor {
         !self.is_edge()
     }
 
-    pub fn edge(self) -> (usize, usize) {
+    pub fn edge(self) -> [usize; 2] {
         match self {
-            Self::Edge(x, y) => (x, y),
+            Self::Edge([x, y]) => [x, y],
             Self::Vertex(x) => panic!("unwrap failed: ({}) is not an edge", x),
         }
     }
 
     pub fn vertex(self) -> usize {
         match self {
-            Self::Edge(x, y) => panic!("unwrap failed: ({}, {}) is not a vertex", x, y),
+            Self::Edge([x, y])=> panic!("unwrap failed: ({}, {}) is not a vertex", x, y),
             Self::Vertex(x) => x,
         }
     }
 
     pub fn is_order_respecting(self) -> bool {
         // note that 'self' must be an edge
-        let (i, j) = self.edge();
+        let [i, j] = self.edge();
         return j - i == 1
     }
 
     pub fn is_disrespected_by(self, other: CubeFactor) -> bool {
         // 'self' must be a vertex, and 'other' has to be an edge
-        let (i, j) = other.edge();
+        let [i, j] = other.edge();
         let k = self.vertex();
 
         i<k && k<j
@@ -1254,10 +1368,10 @@ impl CubeFactor {
 
     pub fn is_blocked(self, factors: &[CubeFactor], graph: &RawSimpleGraph) -> bool {
         if let CubeFactor::Vertex(v) = self {
-            // if this is the basepoint of the tree, then this is trivially bloecked.
+            // if this is the basepoint of the tree, then this is trivially blocked.
             if v == 0 { return true; }
 
-            // otherwise. let it flow and check
+            // otherwise, let it flow and check
             let w = self.flow(graph).terminal();
             if factors.iter().any(|&f| (f.is_vertex() && f == w) || (f.is_edge() && ( f.terminal() == w || f.initial() == w )) ) {
                 true
@@ -1265,27 +1379,39 @@ impl CubeFactor {
                 false
             }
         } else {
-            panic!("fanleed to unwrap. Input must be a vertex");
+            panic!("failed to unwrap: Input must be a vertex, but it is an edge");
         }
     }
 
     pub fn terminal(self) -> CubeFactor {
         // note that 'self' must be an edge
-        CubeFactor::Vertex( self.edge().0 )
+        CubeFactor::Vertex( self.edge()[0] )
     }
 
     pub fn initial(self) -> CubeFactor {
         // note that 'self' must be an edge
-        CubeFactor::Vertex( self.edge().1 )
+        CubeFactor::Vertex( self.edge()[1] )
     }
 
     pub fn flow(self, graph: &RawSimpleGraph) -> CubeFactor {
         if let CubeFactor::Vertex(v) = self {
             if v==0 { panic!("Cannot flow from the basepoint of the maximal tree."); };
-            let terminal = (0..v).rev().find(|&i| graph.contains(i, v) && graph.maximal_tree_contains(i, v) ).unwrap();
-            CubeFactor::Edge( terminal, v )
+            let terminal = (0..v).rev().find(|&i| graph.contains(i, v) && graph.maximal_tree_contains([i, v]) ).unwrap();
+            CubeFactor::Edge( [terminal, v] )
         } else {
             panic!("Cannot to flow. Input must be a vertex.");
+        }
+    }
+
+
+    // This function returns the numbring of the factor in a graph.
+    // For Vertex(x), it is x.
+    // For Edge([x, _]), it is x,.
+    #[inline]
+    pub fn get_order(&self) -> usize {
+        match self {
+            CubeFactor::Vertex(x) => *x,
+            CubeFactor::Edge([x,_]) => *x,
         }
     }
 }
@@ -1322,7 +1448,7 @@ impl<'a> Iterator for EdgeIter<'a> {
             return None;
         };
 
-        let out = CubeFactor::Edge(self.curr.0, self.curr.1);
+        let out = CubeFactor::Edge([self.curr.0, self.curr.1]);
         
         loop {
             if self.curr.0 == 0 {
@@ -1403,9 +1529,9 @@ impl PartialOrd for CubeFactor {
 
         // otherwise the factors are comparable
         match (self, other) {
-            (Self::Edge(x, _), Self::Edge(y, _)) => Some(x.cmp(y)),
-            (Self::Vertex(x), Self::Edge(y, _)) =>  Some(x.cmp(y)),
-            (Self::Edge(x, _), Self::Vertex(y)) => Some(x.cmp(y)),
+            (Self::Edge([x, _]), Self::Edge([y, _])) => Some(x.cmp(y)),
+            (Self::Vertex(x), Self::Edge([y, _])) =>  Some(x.cmp(y)),
+            (Self::Edge([x, _]), Self::Vertex(y)) => Some(x.cmp(y)),
             (Self::Vertex(x), Self::Vertex(y)) =>  Some(x.cmp(y)),
         }
     } 
@@ -1415,7 +1541,7 @@ impl PartialOrd for CubeFactor {
 impl fmt::Display for CubeFactor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CubeFactor::Edge(x, y) => write!(f, "[{} {}]", x, y),
+            CubeFactor::Edge([x, y]) => write!(f, "[{} {}]", x, y),
             CubeFactor::Vertex(x) => write!(f, "{}", x),
         }
     }
@@ -1426,6 +1552,7 @@ impl fmt::Display for CubeFactor {
 mod simple_graph_utility_test {
     use super::SimpleGraph;
     use super::CubeFactor;
+    use crate::graph;
 
     #[test]
     fn display_test() {
@@ -1453,23 +1580,23 @@ mod simple_graph_utility_test {
         let subdivided_graph = SimpleGraph::subdivided_graph_from(&graph, 2);
         let edges:Vec<_> = subdivided_graph.edge_iter().collect();
         let answer = vec![
-            CubeFactor::Edge(0,1),
-            CubeFactor::Edge(1,2),
-            CubeFactor::Edge(2,3),
-            CubeFactor::Edge(3,4),
-            CubeFactor::Edge(2,4)
+            CubeFactor::Edge([0,1]),
+            CubeFactor::Edge([1,2]),
+            CubeFactor::Edge([2,3]),
+            CubeFactor::Edge([3,4]),
+            CubeFactor::Edge([2,4])
         ];
         assert_eq!(edges, answer);
 
         let subdivided_graph = SimpleGraph::subdivided_graph_from(&graph, 3);
         let edges:Vec<_> = subdivided_graph.edge_iter().collect();
         let answer = vec![
-            CubeFactor::Edge(0,1),
-            CubeFactor::Edge(1,2),
-            CubeFactor::Edge(2,3),
-            CubeFactor::Edge(3,4),
-            CubeFactor::Edge(4,5),
-            CubeFactor::Edge(2,5)
+            CubeFactor::Edge([0,1]),
+            CubeFactor::Edge([1,2]),
+            CubeFactor::Edge([2,3]),
+            CubeFactor::Edge([3,4]),
+            CubeFactor::Edge([4,5]),
+            CubeFactor::Edge([2,5])
         ];
         assert_eq!(edges, answer);
     }
@@ -1542,7 +1669,7 @@ pub struct WeightedSimpleGraph<T: PID> {
     vertices_labeling: Vec<String>,
 }
 
-impl<T: PID> WeightedSimpleGraph<T> {
+impl<T: PID + Copy> WeightedSimpleGraph<T> {
     pub fn from(input: Vec<(String, String, T)>)-> Self {
         let mut vertices_labeling: Vec<String> = Vec::new();
         let mut weights = Vec::new();

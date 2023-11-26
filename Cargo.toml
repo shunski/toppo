@@ -1,2 +1,3 @@
 [workspace]
-members = ["util", "alg", "topo_spaces"] 
+resolver = "2"
+members = ["util", "alg", "topo_spaces", "geom", "analysis"] 

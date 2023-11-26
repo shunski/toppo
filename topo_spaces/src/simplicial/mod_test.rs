@@ -151,6 +151,53 @@ mod simplicial_cplx_tests {
 mod simpilicial_cplx_space_tests {
     use crate::simplicial::*;
     use crate::*;
+    use alg::lin_alg::Matrix;
+    use alg::matrix;
+
+    #[test]
+    fn boundary_map() {
+        // test 1
+        let circle = simplicial_cplx!{
+            {"v1", "v2"},
+            {"v2", "v3"},
+            {"v1", "v3"}
+        };
+
+        let boundary_map = circle.boundary_map();
+        let b0 = Matrix::zero(1,3);
+        let b1 = matrix!(i64;
+            [[ 1, 0, 1],
+             [-1, 1, 0],
+             [ 0,-1,-1]]
+        );
+
+        assert_eq!(boundary_map[0].0, b0);
+        assert_eq!(boundary_map[1].0, b1);
+
+        // test 2
+        let square = simplicial_cplx! {
+            {"v0", "v1", "v2"},
+            {"v0", "v1", "v3"}
+        };
+        let boundary_map = square.boundary_map();
+
+        let b1 = matrix!(i64;
+            [[ 1, 1, 0, 1, 0],
+             [-1, 0, 1, 0, 1],
+             [ 0,-1,-1, 0, 0],
+             [ 0, 0, 0,-1,-1]]
+        );
+        let b2 = matrix!(i64;
+            [[ 1, 1],
+             [-1, 0],
+             [ 1, 0],
+             [ 0,-1],
+             [ 0, 1]]
+        );
+        assert_eq!(boundary_map[1].0, b1);
+        assert_eq!(boundary_map[2].0, b2);
+        
+    }
 
     // #[test]
     fn homology_test() {

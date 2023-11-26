@@ -24,7 +24,7 @@ impl Rational {
 
         let mut r = Rational {
             numerator: n.abs() as u64,
-            denumerator: d.abs() as u64,
+            denominator: d.abs() as u64,
             sign: (n>=0) == (d>=0),
         };
 
@@ -39,15 +39,15 @@ impl Rational {
     fn optimize(&mut self) {
 
         if self.numerator == 0 {
-            self.denumerator = 1;
+            self.denominator = 1;
             self.sign = true;
             return;
         }
 
 
-        let gcd = gcd(self.numerator, self.denumerator);
+        let gcd = gcd(self.numerator, self.denominator);
         self.numerator = self.numerator / gcd;
-        self.denumerator = self.denumerator / gcd;
+        self.denominator = self.denominator / gcd;
     }
 
     pub fn abs(mut self) -> Rational {
@@ -59,17 +59,17 @@ impl Rational {
         self.numerator as usize
     }
 
-    pub fn get_denumerator(&self) -> usize {
-        self.denumerator as usize
+    pub fn get_denominator(&self) -> usize {
+        self.denominator as usize
     }
 }
 
 impl Ord for Rational {
     fn cmp(&self, rhs: &Self) -> Ordering {
         let gcd_of_n = gcd(self.numerator, rhs.numerator);
-        let gcd_of_d = gcd(self.denumerator, rhs.denumerator);
-        let a = (self.numerator/gcd_of_n) * (rhs.denumerator/gcd_of_d);
-        let b = (rhs.numerator/gcd_of_n) * (self.denumerator/gcd_of_d);
+        let gcd_of_d = gcd(self.denominator, rhs.denominator);
+        let a = (self.numerator/gcd_of_n) * (rhs.denominator/gcd_of_d);
+        let b = (rhs.numerator/gcd_of_n) * (self.denominator/gcd_of_d);
         if self.sign & rhs.sign { 
             a.cmp(&b) 
         } else if !self.sign & !rhs.sign {
@@ -88,6 +88,14 @@ impl PartialOrd for Rational {
     }
 }
 
+impl Into<f64> for Rational {
+    fn into(self) -> f64 {
+        let mut out = self.numerator as f64 / self.denominator as f64;
+        if !self.sign { out *= -1.0 }
+        out
+    }
+}
+
 
 impl Add for Rational {
     type Output = Self;
@@ -95,20 +103,20 @@ impl Add for Rational {
     fn add(self, rhs: Self) -> Self::Output {
         let n: u64;
         let s: bool;
-        let gcd_of_d = gcd(self.denumerator, rhs.denumerator);
+        let gcd_of_d = gcd(self.denominator, rhs.denominator);
         if self.sign == rhs.sign {
-            n = (self.numerator * (rhs.denumerator/gcd_of_d)) + ((self.denumerator/gcd_of_d) * rhs.numerator);
+            n = (self.numerator * (rhs.denominator/gcd_of_d)) + ((self.denominator/gcd_of_d) * rhs.numerator);
             s = self.sign;
         } else if self.abs() >= rhs.abs() {
-            n = (self.numerator * (rhs.denumerator/gcd_of_d)) - ((self.denumerator/gcd_of_d) * rhs.numerator);
+            n = (self.numerator * (rhs.denominator/gcd_of_d)) - ((self.denominator/gcd_of_d) * rhs.numerator);
             s = self.sign;
         } else {
-            n = ((self.denumerator/gcd_of_d) * rhs.numerator) - (self.numerator * (rhs.denumerator/gcd_of_d));
+            n = ((self.denominator/gcd_of_d) * rhs.numerator) - (self.numerator * (rhs.denominator/gcd_of_d));
             s = rhs.sign;
         }
         let mut r = Rational { 
             numerator: n, 
-            denumerator: self.denumerator * (rhs.denumerator/gcd_of_d),
+            denominator: self.denominator * (rhs.denominator/gcd_of_d),
             sign: s,
         };
         r.optimize();
@@ -130,7 +138,7 @@ impl Mul for Rational {
     fn mul(self, rhs: Self) -> Self::Output {
         let mut r = Rational { 
             numerator: self.numerator * rhs.numerator, 
-            denumerator: self.denumerator * rhs.denumerator,
+            denominator: self.denominator * rhs.denominator,
             sign: self.sign == rhs.sign,
         };
         r.optimize();
@@ -144,8 +152,8 @@ impl Div for Rational {
     fn div(self, rhs: Self) -> Self::Output {
         if rhs == Self::zero() { panic!("Cannot divide by zero.") };
         let mut r = Rational { 
-            numerator: self.numerator * rhs.denumerator, 
-            denumerator: self.denumerator * rhs.numerator,
+            numerator: self.numerator * rhs.denominator, 
+            denominator: self.denominator * rhs.numerator,
             sign: self.sign == rhs.sign,
         };
         r.optimize();
@@ -214,10 +222,10 @@ impl std::fmt::Debug for Rational {
         } else {
             "-"
         };
-        if self.denumerator == 1 {
+        if self.denominator == 1 {
             write!(f, "{}{}", sign, self.numerator)
         } else {
-            write!(f, "{}{}/{}", sign, self.numerator, self.denumerator)
+            write!(f, "{}{}/{}", sign, self.numerator, self.denominator)
         }
     }
 }
@@ -229,10 +237,10 @@ impl std::fmt::Display for Rational {
         } else {
             "-"
         };
-        if self.denumerator == 1 {
+        if self.denominator == 1 {
             write!(f, "{}{}", sign, self.numerator)
         } else {
-            write!(f, "{}{}/{}", sign, self.numerator, self.denumerator)
+            write!(f, "{}{}/{}", sign, self.numerator, self.denominator)
         }
     }
 }
@@ -243,10 +251,10 @@ mod rational_test {
     use crate::rational;
     #[test] 
     fn init_tests() {
-        assert_eq!(Rational::new(-1, 1), Rational{ numerator: 1, denumerator: 1, sign: false });
-        assert_eq!(Rational::new(0, 10), Rational{ numerator: 0, denumerator: 1, sign: true });
-        assert_eq!(Rational::new(9, -6), Rational{ numerator: 3, denumerator: 2, sign: false });
-        assert_eq!(Rational::new(-9, -3), Rational{ numerator: 3, denumerator: 1, sign: true });
+        assert_eq!(Rational::new(-1, 1), Rational{ numerator: 1, denominator: 1, sign: false });
+        assert_eq!(Rational::new(0, 10), Rational{ numerator: 0, denominator: 1, sign: true });
+        assert_eq!(Rational::new(9, -6), Rational{ numerator: 3, denominator: 2, sign: false });
+        assert_eq!(Rational::new(-9, -3), Rational{ numerator: 3, denominator: 1, sign: true });
 
         assert_eq!(Rational::new(-4, -6), Rational::new(2, 3));
         assert_eq!(Rational::new(15, -12), Rational::new(5, 4) * rational!(-1));
@@ -287,7 +295,7 @@ mod rational_test {
 
     #[test]
     #[should_panic]
-    fn init_with_denumerator_zero() {
+    fn init_with_denominator_zero() {
         let _a = Rational::new(100, 0);
     }
 

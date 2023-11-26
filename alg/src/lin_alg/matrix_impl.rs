@@ -1,5 +1,7 @@
 use crate::commutative::{PID, Field};
+use crate::matrix;
 
+use std::fmt::{Display, Debug};
 use std::{
     alloc,
     marker::PhantomData,
@@ -126,16 +128,20 @@ impl<T: PID> SubMatrix<T> {
         assert!(self.size().0 == 1 && rhs.size().1 == 1);
 
         // This function makes sure that the arguments are of the same size
-        assert!(self.size().1 == rhs.size().0);
+        assert!(self.size().1 == rhs.size().0, 
+            "The dot product cannot be performed between the matrices of different size. left has {:?} cols, but the right has {:?} rows",
+            self.size().1,
+            rhs.size().0
+        );
 
-        (0..self.size().1).map(|i| self[(0, i)] * rhs[(i,0)]).sum()
+        (0..self.size().1).map(|i| self[(0, i)].clone() * rhs[(i,0)].clone()).sum()
     }
 
     pub fn as_matrix(&self) -> Matrix<T> {
         let mut out = Matrix::new(self.size().0, self.size().1);
         for i in 0..self.size().0 {
             for j in 0..self.size().1 {
-                out[(i,j)] = self[(i, j)];
+                out.write( (i,j), self[(i, j)].clone() );
             }
         }
 
@@ -144,35 +150,35 @@ impl<T: PID> SubMatrix<T> {
 
     pub fn swap_rows(&mut self, r1: usize, r2: usize) {
         for j in 0..self.size().1 {
-            let tmp = self[(r1, j)];
-            self[(r1, j)] = self[(r2, j)];
+            let tmp = self[(r1, j)].clone();
+            self[(r1, j)] = self[(r2, j)].clone();
             self[(r2, j)] = tmp;
         }
     }
 
     pub fn swap_cols(&mut self, c1: usize, c2: usize) {
         for i in 0..self.size().0 {
-            let tmp = self[(i, c1)];
-            self[(i, c1)] = self[(i, c2)];
+            let tmp = self[(i, c1)].clone();
+            self[(i, c1)] = self[(i, c2)].clone();
             self[(i, c2)] = tmp;
         }
     }
 
     pub fn row_operation(&mut self, r1: usize, r2: usize, scalar: T) {
         let r2 = &self[(r2, ..)] * scalar;
-        (0..self.size().1).for_each(|i| self[(r1, i)] += r2[(0, i)]);
+        (0..self.size().1).for_each(|i| self[(r1, i)] += r2[(0, i)].clone());
     }
 
     pub fn col_operation(&mut self, c1: usize, c2: usize, scalar: T) {
         let c2 = &self[(.., c2)] * scalar;
-        (0..self.size().0).for_each(|j| self[(j, c1)] += c2[(j, 0)]);
+        (0..self.size().0).for_each(|j| self[(j, c1)] += c2[(j, 0)].clone());
     }
 
     pub fn write(&mut self, m: &SubMatrix<T>) {
-        assert_eq!(self.size(), m.size());
+        assert_eq!(self.size(), m.size(), "cannot write a matrix to a (sub)matrix of different size");
         for i in 0..self.size().0 {
             for j in 0..self.size().1 {
-                self[(i,j)] = m[(i,j)];
+                self[(i,j)] = m[(i,j)].clone();
             }
         }
     }
@@ -238,9 +244,13 @@ fn unpack_bounds_for_sub(range: &impl ModifiedUsizeRangeBounds, size: usize) -> 
     (start, end)
 }
 
-fn check_bounds_for_sub(start: usize, end: usize, size: usize) {
-    assert!(end - start <= size, "range not valid: specified range is {start}..{end} but this matrix has length {size}.");
-    assert!(end <= size, "range not valid: specified range is {start}..{end} but this matrix has length {size}.");
+fn check_bounds_for_sub<const ROW: bool>(start: usize, end: usize, size: usize) {
+    assert!(end - start <= size, "range not valid: specified range is {start}..{end} but this matrix has {size} {}s.", 
+        if ROW {"row"} else {"column"}
+    );
+    assert!(end <= size, "range not valid: specified range is {start}..{end} but this matrix has {size} {}s.",
+        if ROW {"row"} else {"column"}
+    );
 }
 
 macro_rules! submatrix_index_by_ranges_impl {
@@ -251,8 +261,8 @@ macro_rules! submatrix_index_by_ranges_impl {
                 let (row_start, row_end) = unpack_bounds_for_sub(&rows, self.size().0);
                 let (col_start, col_end) = unpack_bounds_for_sub(&cols, self.size().1);
 
-                check_bounds_for_sub(row_start, row_end, self.size().0);
-                check_bounds_for_sub(col_start, col_end, self.size().1);
+                check_bounds_for_sub::<true>(row_start, row_end, self.size().0);
+                check_bounds_for_sub::<false>(col_start, col_end, self.size().1);
 
                 let start_offset = self.offsets().0 * row_start + self.offsets().1 * col_start;
 
@@ -269,8 +279,8 @@ macro_rules! submatrix_index_by_ranges_impl {
                 let (row_start, row_end) = unpack_bounds_for_sub(&rows, self.size().0);
                 let (col_start, col_end) = unpack_bounds_for_sub(&cols, self.size().1);
 
-                check_bounds_for_sub(row_start, row_end, self.size().0);
-                check_bounds_for_sub(col_start, col_end, self.size().1);
+                check_bounds_for_sub::<true>(row_start, row_end, self.size().0);
+                check_bounds_for_sub::<false>(col_start, col_end, self.size().1);
 
                 let start_offset = self.offsets().0 * row_start + self.offsets().1 * col_start;
 
@@ -296,24 +306,25 @@ submatrix_index_by_ranges_impl!{
 }
 
 #[inline]
-fn check_bounds_for_index(r: usize, c: usize, (row_range, col_range): (ops::Range<usize>, ops::Range<usize>) ) {
+fn check_bounds_for_index<T: PID>(r: usize, c: usize, m: &SubMatrix<T> ) {
+    let (row_range, col_range) = m.size_as_range();
     assert!( 
         row_range.contains( &r ) && col_range.contains( &c ),
-        "Index out of bounds: index=({r}, {c}), but the matrix is of size ({row_range:?}, {col_range:?})"
+        "Index out of bounds: index=({r}, {c}), but the matrix is of size {:?}", m.size()
     );
 }
 
 impl<T: PID> ops::Index<(usize, usize)> for SubMatrix<T> {
     type Output = T;
     fn index(&self, (r, c): (usize, usize)) -> &T {
-        check_bounds_for_index(r, c, self.size_as_range());
+        check_bounds_for_index(r, c, self);
         unsafe{ &*self.as_ptr().add( r*self.offsets().0 + c*self.offsets().1 ) }
     }
 }
 
 impl<T: PID> ops::IndexMut<(usize, usize)> for SubMatrix<T> {
     fn index_mut(&mut self, (r, c): (usize, usize)) -> &mut T {
-        check_bounds_for_index(r, c, self.size_as_range());
+        check_bounds_for_index(r, c, self);
         unsafe{ &mut *self.as_mut_ptr().add( r*self.offsets().0 + c*self.offsets().1 )}
     }
 }
@@ -328,7 +339,7 @@ macro_rules! submatrix_add_sub_impl {
                 let mut out = Matrix::new(self.size().0, self.size().1);
                 for i in 0..self.size().0 {
                     for j in 0..self.size().1 {
-                        out[(i,j)] = $bin_op_tr::$bin_op_fn(self[(i,j)], rhs[(i,j)]);
+                        out[(i,j)] = $bin_op_tr::$bin_op_fn(self[(i,j)].clone(), rhs[(i,j)].clone());
                     }
                 }
                 out
@@ -343,11 +354,13 @@ macro_rules! submatrix_add_sub_assign_impl {
     ($(($bin_op_tr: ident, $bin_op_fn: ident)) *) => {$(
         impl<T: PID> ops::$bin_op_tr<&SubMatrix<T>> for Matrix<T> {
             fn $bin_op_fn(&mut self, rhs: &SubMatrix<T>) {
-                if self.size() != rhs.size() { panic!(); }
+                assert_eq!( self.size(), rhs.size(), 
+                    "Addition or subtraction cannnot be performed between matrices of different size." 
+                );
 
                 for i in 0..self.size().0 {
                     for j in 0..self.size().1 {
-                        $bin_op_tr::$bin_op_fn(&mut self[(i,j)], rhs[(i,j)]);
+                        $bin_op_tr::$bin_op_fn(&mut self[(i,j)], rhs[(i,j)].clone());
                     }
                 };
             }
@@ -355,11 +368,13 @@ macro_rules! submatrix_add_sub_assign_impl {
 
         impl<T: PID> ops::$bin_op_tr<Matrix<T>> for Matrix<T> {
             fn $bin_op_fn(&mut self, rhs: Matrix<T>) {
-                if self.size() != rhs.size() { panic!(); }
+                assert_eq!( self.size(), rhs.size(), 
+                    "Addition or subtraction cannnot be performed between matrices of different size." 
+                );
 
                 for i in 0..self.size().0 {
                     for j in 0..self.size().1 {
-                        $bin_op_tr::$bin_op_fn(&mut self[(i,j)], rhs[(i,j)]);
+                        $bin_op_tr::$bin_op_fn(&mut self[(i,j)], rhs[(i,j)].clone());
                     }
                 };
             }
@@ -385,12 +400,12 @@ impl<T: PID> ops::Mul for &SubMatrix<T> {
 
 
 
-/// multiplication between
-///     (1) &SubMatrix<T> and &SubMatrix<T>
-///     (2) Matrix<T> and &SubMatrix<T>
-///     (3) &SubMatrix<T> and Matrix<T>
-///     (4) Matrix<T> and Matrix<T>
-///  are suppoerted
+// multiplication between
+//     (1) &SubMatrix<T> and &SubMatrix<T>
+//     (2) Matrix<T> and &SubMatrix<T>
+//     (3) &SubMatrix<T> and Matrix<T>
+//     (4) Matrix<T> and Matrix<T>
+//  are suppoerted
 
 impl<T: PID> ops::Mul<&SubMatrix<T>> for Matrix<T> {
     type Output = Matrix<T>;
@@ -417,7 +432,7 @@ impl<T: PID> ops::Mul<Matrix<T>> for Matrix<T> {
     }
 }
 
-/// Scalar multiplication, addition/subtraction of matrices consumes the ownership of Matrix<T>
+// Scalar multiplication, addition/subtraction of matrices consumes the ownership of Matrix<T>
 macro_rules! binary_op_impl {
     ($(($bin_op_tr: ident, $bin_op_fn: ident, $op_assign: tt)) *) => {$(
         impl<T: PID> ops::$bin_op_tr<&SubMatrix<T>> for Matrix<T> {
@@ -475,7 +490,7 @@ impl<T: PID> ops::Mul<T> for &SubMatrix<T> {
         let mut out = Matrix::new(self.size().0, self.size().1);
         for i in 0..out.size().0 {
             for j in 0..out.size().1 {
-                out[(i,j)] = self[(i,j)] * rhs;
+                out[(i,j)] = self[(i,j)].clone() * rhs.clone();
             }
         };
         out
@@ -501,7 +516,7 @@ impl<T: Field> ops::Div<T> for &SubMatrix<T> {
         let mut out = Matrix::new(self.size().0, self.size().1);
         for i in 0..out.size().0 {
             for j in 0..out.size().1 {
-                out[(i,j)] = self[(i,j)] / rhs;
+                out[(i,j)] = self[(i,j)].clone() / rhs.clone();
             }
         };
         out
@@ -513,7 +528,7 @@ impl<T: PID> ops::MulAssign<T> for SubMatrix<T> {
     fn mul_assign(&mut self, rhs: T) {
         for i in 0..self.size().0 {
             for j in 0..self.size().1{
-                self[(i,j)] *= rhs;
+                self[(i,j)] *= rhs.clone();
             }
         }
     }
@@ -529,7 +544,7 @@ impl<T: Field> ops::DivAssign<T> for SubMatrix<T> {
     fn div_assign(&mut self, rhs: T) {
         for i in 0..self.size().0 {
             for j in 0..self.size().1{
-                self[(i,j)] /= rhs;
+                self[(i,j)] /= rhs.clone();
             }
         };
     }
@@ -649,7 +664,7 @@ impl<T: PID> Matrix<T> {
         let mut out = Matrix::new(size.0, size.1);
         for i in 0..size.0 {
             for j in 0..size.1 {
-                out[(i, j)] = v[i][j];
+                out[(i, j)] = v[i][j].clone();
             }
         }
 
@@ -662,6 +677,10 @@ impl<T: PID> Matrix<T> {
         (self.size.1, self.offsets.1) = tmp;
 
         self
+    }
+
+    fn write(&mut self, (i,j): (usize, usize), val: T) {
+        unsafe{ std::ptr::write( self.ptr().add(i*self.offsets().0 + j*self.offsets().1 ), val); }
     }
 }
 
@@ -677,6 +696,18 @@ impl<T> Matrix<T>
         for i in 0..out.size().0 {
             for j in 0..out.size().1 {
                 out[(i,j)] = rng.gen();
+            }
+        }
+        out
+    }
+
+    pub fn random_symmetric(n: usize, m: usize) -> Matrix<T> {
+        let mut out = Matrix::new(n ,m);
+        let mut rng = rand::thread_rng();
+        for i in 0..out.size().0 {
+            for j in i..out.size().1 {
+                out[(i,j)] = rng.gen();
+                out[(j,i)] = out[(i,j)].clone();
             }
         }
         out
@@ -722,13 +753,13 @@ impl<T: PID> Clone for Matrix<T> {
     }
 }
 
-impl<T: PID + std::fmt::Debug + std::fmt::Display> fmt::Debug for SubMatrix<T> {
+impl<T: PID + std::fmt::Debug> fmt::Debug for SubMatrix<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "\n")?;
         for i in 0..self.size().0 {
             write!(f, "| ")?;
             for j in 0..self.size().1 {
-                write!(f, "{}", self[(i,j)])?;
+                write!(f, "{:?}", self[(i,j)])?;
                 if j != self.size().1-1 {
                     write!(f, "\t")?;
                 }
@@ -739,9 +770,15 @@ impl<T: PID + std::fmt::Debug + std::fmt::Display> fmt::Debug for SubMatrix<T> {
     }
 }
 
-impl<T: PID + std::fmt::Debug + std::fmt::Display> fmt::Debug for Matrix<T> {
+impl<T: PID + std::fmt::Display> fmt::Display for Matrix<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        (**self).fmt(f)
+        Display::fmt(&(**self), f)
+    }
+}
+
+impl<T: PID + std::fmt::Debug> fmt::Debug for Matrix<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&(**self), f)
     }
 }
 
@@ -759,24 +796,27 @@ macro_rules! vector {
     };
 }
 
-#[allow(unused)]
 impl <T: PID> Matrix<T> {
     pub fn zero(n: usize, m: usize) -> Self {
+        assert!(n>0 && m>0, "the size of the matrix must be a pair positive integers but size=({n}, {m}).");
         let mut out = Matrix::new(n, m);
-        for i in 0..out.size().0 {
-            for j in 0..out.size().1 {
-                out[(i, j)] = T::zero();
+        for i in 0..n {
+            for j in 0..m {
+                out.write((i,j), T::zero());
             }
         }
         out
     }
 
     pub fn identity(size: usize) -> Self {
+        assert!(size>0 , "the size of the identity matrix must be a positive integer but size={size}).");
         let mut mat = Matrix::zero(size, size);
         (0..size).for_each(|i| mat[(i,i)] = T::one());
         mat
     }
-    
+}
+
+impl <T: PID+Debug+Display+Copy> Matrix<T> {
     pub fn smith_normal_form(mut self) -> (Self, Self, Self, Self, Self) {
         use crate::commutative::bezout_identity;
 
@@ -842,7 +882,7 @@ impl <T: PID> Matrix<T> {
         // }
 
         // now run the general algorithm
-        while( i < self.size().0 && j < self.size().1) {
+        while i < self.size().0 && j < self.size().1 {
             // choosing a pivot
             j = match (j..self.size().1).find(|&l| (i..self.size().0).any(|k| self[(k, l)] != T::zero()) ){
                 Some(l) => l,
@@ -1034,7 +1074,7 @@ impl <T: PID> Matrix<T> {
 }
 
 #[allow(unused)]
-impl <T:Field> Matrix<T> {
+impl <T:Field+Copy> Matrix<T> {
     pub fn rank_as_linear_map(&self) -> usize {
         let mut clone = self.clone();
         let shorter_side = std::cmp::min(self.size().0, self.size().1);
@@ -1075,18 +1115,18 @@ impl <T:Field> Matrix<T> {
 }
 
 
-use super::FormalSum;
+use super::Vector;
 // Change of basis
-impl<Basis> ops::Mul<Vec<Basis>> for Matrix<i128> 
-    where Basis: Clone + PartialEq, i128: ops::Mul<Basis, Output = FormalSum<Basis>>
+impl<Basis> ops::Mul<Vec<Basis>> for Matrix<i64> 
+    where Basis: Clone + PartialEq + PartialOrd, i64: ops::Mul<Basis, Output = Vector<i64, Basis>>
 {
-    type Output = Vec<FormalSum<Basis>>;
+    type Output = Vec<Vector<i64, Basis>>;
 
     fn mul(self, rhs: Vec<Basis>) -> Self::Output {
         assert!(self.size().1==rhs.len(), "Multiplication failed: dimensions do not match: the left has size {:?} but the right has size {}", self.size, rhs.len());
         let mut out = Vec::new();
         for i in 0..self.size().0 {
-            out.push( (0..self.size().1).map(|j| self[(i, j)]*rhs[j].clone() ).sum::<FormalSum<_>>() );
+            out.push( (0..self.size().1).map(|j| self[(i, j)]*rhs[j].clone() ).sum::<Vector<_, _>>() );
         }
         out
     }
@@ -1122,6 +1162,103 @@ impl Matrix<f64> {
         out
     }
 
+    pub fn random_unit_vec(n: usize) -> Matrix<f64> {
+        let mut out = Matrix::new(n ,1);
+        let mut r = thread_rng();
+        for i in 0..n {
+            out[(i,0)] = r.gen_range(-1.0..1.0);
+        }
+        &*out / (&*out).two_norm()
+    }
+
+    pub fn random_sparse_symmetric(n: usize, m: usize) -> Matrix<f64> {
+        let mut out = Matrix::random_symmetric(n ,m);
+        let mut rng = rand::thread_rng();
+        for i in 0..n {
+            for j in i..m {
+                let a: usize = rng.gen::<usize>() % 4;
+                if a!=0 {
+                    out[(i,j)] = 0.0;
+                    out[(j,i)] = 0.0;
+                }
+            }
+        }
+        out
+    }
+
+    pub fn gram_schmidt(mut self) -> Matrix<f64> {
+        // Normalize the first colmnn
+        let factor = self[(..,0)].two_norm();
+        self[(..,0)] /= factor;
+
+        for i in 1..self.size().1 {
+            for j in 0..i {
+                let update = &self[(..,i)] - &self[(..,j)] * (self[(..,i)].transpose().dot(&self[(..,j)]));
+                self[(..,i)].write( &update );
+            }
+            let factor = self[(..,i)].two_norm();
+            self[(..,i)] /= factor;
+        }
+
+        self
+    }
+
+    pub fn gram_schmidt_without_normalize(mut self) -> Matrix<f64> {
+        for i in 1..self.size().1 {
+            for j in 0..i {
+                let update = &self[(..,i)] - &self[(..,j)] * (self[(..,i)].transpose().dot(&self[(..,j)])) / (self[(..,j)].transpose().dot(&self[(..,j)]));
+                self[(..,i)].write( &update );
+            }
+        }
+
+        self
+    }
+
+    fn gram_schmidt_coeff_update(&mut self, basis: &Matrix<f64>, orthogonal_basis: &Matrix<f64>) {
+        for i in 0..basis.size().1 {
+            for j in 0..i {
+                self[(i,j)] = basis[(..,i)].transpose().dot(&orthogonal_basis[(..,j)])
+                    / orthogonal_basis[(..,j)].transpose().dot(&orthogonal_basis[(..,j)]);
+            }
+        }
+    }
+
+    pub fn lll_lattice_reduce(mut self, delta: f64) -> Matrix<f64> {
+        assert!(self.size().0 >= self.size().1, "input basis invalid.");
+        assert!(0.25 < delta && delta < 1.0, "'delta' must satisfy 0.25 < 'delta' < 1.0, but it is 'delta'");
+
+        let mut orthogonal_basis = self.clone().gram_schmidt_without_normalize();
+        let mut gram_schmidt_coeff = Self::zero(self.size().1, self.size().1);
+        gram_schmidt_coeff.gram_schmidt_coeff_update(&self, &orthogonal_basis);
+
+        let mut i = 1;
+        while i < self.size().1 {
+            for j in (0..i).rev() {
+                if gram_schmidt_coeff[(i,j)].abs() <= 0.5 { continue; }
+
+                let update = &self[(..,i)] - &self[(..,j)] * gram_schmidt_coeff[(i,j)].round();
+                self[(..,i)].write( &update );
+
+                // ToDo: change the following code so that it does the necessary updates only.
+                orthogonal_basis = self.clone().gram_schmidt_without_normalize();
+                gram_schmidt_coeff.gram_schmidt_coeff_update(&self, &orthogonal_basis)
+            }
+
+            let i_norm_squared = orthogonal_basis[(..,i)].transpose().dot( &orthogonal_basis[(..,i)] );
+            let i_minus_1_norm_squared = orthogonal_basis[(..,i-1)].transpose().dot( &orthogonal_basis[(..,i-1)] );
+            if i_norm_squared > i_minus_1_norm_squared * (delta - gram_schmidt_coeff[(i,i-1)].powi(2)) {
+                i = i+1;
+            } else {
+                self.swap_cols(i-1, i);
+                orthogonal_basis = self.clone().gram_schmidt_without_normalize();
+                gram_schmidt_coeff.gram_schmidt_coeff_update(&self, &orthogonal_basis);
+                i = std::cmp::max(i-1, 1);
+            }
+        }
+
+        self
+    }
+
     pub fn householder_vec(mut self) -> (Matrix<f64>, f64) {
         if self.size().1 > 1 {
             panic!("this function takes a column vector only, but the input has size {:?}.", self.size());
@@ -1145,6 +1282,24 @@ impl Matrix<f64> {
             let d = self[(0,0)]*self[(0,0)]; 
             self /= self[(0,0)];
             (self, 2.0*d/(a+d))
+        }
+    }
+
+    pub fn givens_rotation(a: f64, b: f64) -> (f64, f64) {
+        if b.abs()<0.000000000001 {
+            return (1.0, 0.0)
+        }
+
+        if a.abs() < b.abs() {
+            let c = - a/b; 
+            let y = 1.0/((1.0+c*c).sqrt());
+            let x = c*y;
+            (x, y)
+        } else {
+            let c = - b/a; 
+            let x = 1.0/((1.0+c*c).sqrt());
+            let y = c*x;
+            (x,y)
         }
     }
 
@@ -1245,6 +1400,244 @@ impl Matrix<f64> {
 
         (spectrum, eigen_vectors)
     }
+
+
+    pub fn spectrum_symmetric(mut self) -> Self {
+        assert_eq!( self.size().0, self.size().1,
+            "Input to this function must be a square matrix."
+        );
+        let n = self.size().0;
+        self.symmetric_qr(false);
+
+        let mut out = vec!{0_f64; n};
+        let mut i=0;
+        while i < n {
+            if i == n-1 || self[(i+1,i)].abs() < 0.00000000000001 {
+                out[i] = self[(i,i)];
+                i+=1;
+            } else {
+                (out[i], out[i+1]) = self[(i..i+2, i..i+2)].real_spectrum_of_two_by_two().unwrap();
+                i+=2;
+            }
+        }
+
+        out.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        let out = {
+            let mut a = Matrix::new(n,1);
+            (0..n).for_each( |i| a[(i,0)]=out[i] );
+            a
+        };
+        out
+    }
+
+    pub fn spectrum_with_invariant_space_symmetric(self) -> (Matrix<f64>, Matrix<f64>) {
+        assert_eq!( self.size().0, self.size().1,
+            "Input to this function must be a square matrix."
+        );
+        let n = self.size().0;
+
+        // initialize the eigenvectors
+        let mut eigen_vectors = Matrix::<f64>::new(n, n);
+        let elem = 1.0 / (n as f64).sqrt();
+        for i in 0..n {
+            for j in 0..n {
+                eigen_vectors[(i,j)] = elem;
+            }
+        }
+
+        // get the eigenvalues
+        let spectrum = self.clone().spectrum_symmetric();
+
+        // run the inverse iteration to get the eigenvector for each of the eigenvalues
+        for i in 0..n {
+            let lambda = spectrum[(i,0)];
+
+            let mut m = self.clone();
+            for j in 0..n {
+                m[(j,j)] -= lambda;
+            }
+
+            let mut update = m.clone().solve( eigen_vectors[(.., i)].as_matrix() );
+            update /= update.two_norm();
+            eigen_vectors[(.., i)].write_and_move( update );
+            let mut update = m.solve( eigen_vectors[(.., i)].as_matrix() );
+            update /= update.two_norm();
+            eigen_vectors[(.., i)].write_and_move( update );
+        }
+
+        (spectrum, eigen_vectors)
+    }
+
+    pub fn spectrum_with_n_smallest_eigenvecs_symmetric(self, n: usize) -> (Matrix<f64>, Matrix<f64>) {
+        assert_eq!( self.size().0, self.size().1,
+            "Input to this function must be a square matrix."
+        );
+        let size = self.size().0;
+
+        // initialize the eigenvectors
+        let mut eigen_vectors = Matrix::<f64>::new(size, n);
+        let elem = 1.0 / (size as f64).sqrt();
+        for i in 0..size {
+            for j in 0..n {
+                eigen_vectors[(i,j)] = elem;
+            }
+        }
+
+        // get the eigenvalues
+        let spectrum = self.clone().spectrum_symmetric();
+
+        // run the inverse iteration to get the eigenvector for each of the eigenvalues
+        for i in 0..n {
+            let lambda = spectrum[(i,0)];
+
+            let mut m = self.clone();
+            for j in 0..size {
+                m[(j,j)] -= lambda;
+            }
+
+            let mut update = m.clone().solve( eigen_vectors[(.., i)].as_matrix() );
+            update /= update.two_norm();
+            eigen_vectors[(.., i)].write_and_move( update );
+            let mut update = m.solve( eigen_vectors[(.., i)].as_matrix() );
+            update /= update.two_norm();
+            eigen_vectors[(.., i)].write_and_move( update );
+        }
+
+        (spectrum, eigen_vectors)
+    }
+
+    pub fn spectrum_with_n_th_eigenvec_symmetric(self, n: usize) -> (f64, Matrix<f64>) {
+        assert_eq!( self.size().0, self.size().1,
+            "Input to this function must be a square matrix."
+        );
+        let size = self.size().0;
+
+        // initialize the eigenvectors
+        let mut eigen_vectors = Matrix::<f64>::new(size, 1);
+        let elem = 1.0 / (size as f64).sqrt();
+        for i in 0..size {
+            eigen_vectors[(i,0)] = elem;
+        }
+
+        // get the eigenvalues
+        let spectrum = self.clone().spectrum_symmetric();
+
+        // run the inverse iteration to get the eigenvector
+        let lambda = spectrum[(n,0)];
+
+        let mut m = self.clone();
+        for j in 0..size {
+            m[(j,j)] -= lambda;
+        }
+
+        let mut update = m.clone().solve( eigen_vectors[(.., 0)].as_matrix() );
+        update /= update.two_norm();
+        eigen_vectors[(.., 0)].write_and_move( update );
+        let mut update = m.solve( eigen_vectors[(.., 0)].as_matrix() );
+        update /= update.two_norm();
+        eigen_vectors[(.., 0)].write_and_move( update );
+
+        (lambda, eigen_vectors)
+    }
+
+    // pub fn extremal_spectrum_symmetric(self, n_eigen: usize, small: bool) -> (Matrix<f64>, Matrix<f64>) {
+    //     let tolerance = 0.000000000001;
+    //     let (mut a, mut b, op) = self.lanzos_tridiagonalization();
+        
+    //     let n = a.size().0;
+
+    //     let mut q=0;
+    //     while q<n {
+    //         for i in 0..n-1 {
+    //             if b[(i,0)].abs()<tolerance {
+    //                 b[(i,0)] = 0.0;
+    //             }
+    //         }
+
+    //         q = (0..n-2)
+    //             .find( |&i| b[(n-i-2, 0)].abs()>tolerance && b[(n-i-3, 0)].abs()>tolerance )
+    //             .unwrap_or(n);
+
+    //         let p = (1..n-q)
+    //             .rev()
+    //             .find(|&i| b[(i-1, 0)].abs()<tolerance )
+    //             .unwrap_or(0);
+
+    //         if q<n {
+    //             debug_assert!( (n-q)-p > 2);
+
+    //             let mut tmp = Matrix::zero(n-q-p, n-q-p);
+    //             for i in 0..tmp.size().0 {
+    //                 tmp[(i,i)] = a[(p+i, 0)];
+    //                 if i<tmp.size().0-1 {
+    //                     tmp[(i,i+1)] = b[(p+i, 0)];
+    //                     tmp[(i+1,i)] = b[(p+i, 0)];
+    //                 }
+    //             }
+
+    //             let _givens = tmp.implicit_symmetric_qr_with_wilkinson_shift(false);
+
+    //             for i in 0..tmp.size().0 {
+    //                 a[(p+i, 0)] = tmp[(i,i)];
+    //                 if i<tmp.size().0-1 {
+    //                     b[(p+i, 0)] = tmp[(i,i+1)];
+    //                 }
+    //             }
+    //         }
+    //     }
+
+    //     let mut spectrum = vec!{0_f64; n};
+    //     let mut i=0;
+    //     while i < n {
+    //         if i == n-1 || self[(i+1,i)].abs() < 0.00000000001 {
+    //             spectrum[i] = self[(i,i)];
+    //             i+=1;
+    //         } else {
+    //             (spectrum[i], spectrum[i+1]) = self[(i..i+2, i..i+2)].real_spectrum_of_two_by_two().unwrap();
+    //             i+=2;
+    //         }
+    //     }
+
+    //     spectrum.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    //     let spectrum = {
+    //         let mut a = Matrix::new(n_eigen,1);
+    //         let offset = if small{0} else {n-n_eigen};
+    //         (0..n_eigen).for_each( |i| a[(i,0)]=spectrum[i+offset] );
+    //         a
+    //     };
+
+    //     // initialize the eigenvectors
+    //     let mut eigenvectors = Matrix::<f64>::new(n, n_eigen);
+    //     let elem = 1.0 / (n as f64).sqrt();
+    //     for i in 0..n {
+    //         for j in 0..n_eigen {
+    //             eigenvectors[(i,j)] = elem;
+    //         }
+    //     }
+
+    //     // run the inverse iteration to get the eigenvector for each of the eigenvalues
+    //     for i in 0..n_eigen {
+    //         let offset = if small{0} else {n-n_eigen};
+    //         let lambda = spectrum[(i+offset,0)];
+
+    //         let mut m = self.clone();
+    //         for j in 0..n {
+    //             m[(j,j)] -= lambda;
+    //         }
+
+    //         let mut update = m.clone().solve( eigenvectors[(.., i)].as_matrix() );
+    //         update /= update.two_norm();
+    //         eigenvectors[(.., i)].write_and_move( update );
+    //         let mut update = m.solve( eigenvectors[(.., i)].as_matrix() );
+    //         update /= update.two_norm();
+    //         eigenvectors[(.., i)].write_and_move( update );
+    //     }
+
+    //     // recover the original eigenvectors
+    //     let eigenvectors = op * eigenvectors;
+
+    //     (spectrum, eigenvectors)
+    // }
 }
 
 impl SubMatrix<f64> {
@@ -1453,9 +1846,282 @@ impl SubMatrix<f64> {
     pub fn qr_with_op(&mut self) -> Matrix<f64> {
         self.raw_qr(true)
     }
+
+    pub fn householder_tridiagonalization(&mut self, with_op: bool) {
+        let n = self.size().0;
+        for i in 0..n-2 {
+            let (v, b) = self[(i+1.., i)].householder_vec();
+            let v = &*v;
+            let p = (&self[(i+1.., i+1..)] * v) * b;
+            let p = &*p;
+            let w = p - v * b/2.0*(v.transpose().dot(p));
+            let w = &*w;
+            self[(i+1, i)] = self[(i+1.., i)].two_norm();
+            self[(i, i+1)] = self[(i+1, i)];
+
+
+            // computing 
+            //  - let update = &self[(i+1.., i+1..)] - v*w.transpose() - w*v.transpose();
+            //  - self[(i+1.., i+1..)].write( &*update );
+            // but with exploiting the symmetricity
+            for j in 0..n-(i+1) {
+                self[(j+i+1, j+i+1)] -= 2.0*v[(j,0)]*w[(j,0)];
+                for k in j+1..n-(i+1) {
+                    self[(j+i+1,k+i+1)] -= v[(j,0)]*w[(k,0)] + v[(k,0)]*w[(j,0)];
+                    self[(k+i+1,j+i+1)] = self[(j+i+1,k+i+1)];
+                }
+            }
+            if with_op {
+                self[(i+2.., i)].write( &v[(1..,0)] );
+            }
+        }
+    }
+
+    pub fn extract_householder_vecs(&self) -> Matrix<f64> {
+        assert_eq!( self.size().0, self.size().1,
+            "Input to this function must be a square matrix."
+        );
+        let n = self.size().0;
+
+        if n == 1 {
+            let x = self[(0,0)];
+            let s = 2.0/(x*x+1.0);
+            matrix!(f64;
+                [[1.0-s, -s*x],
+                 [-s*x, 1.0-s*x*x]]
+            )
+        } else {
+            let mut m = Matrix::identity(n+1);
+            let v = &self[(..,0)];
+            let s = 2.0 / (v.transpose().dot(v)+1.0);
+            let q = self[(1.., 1..)].extract_householder_vecs();
+            let q = &*q;
+
+            m[(0,0)] = 1.0-s;
+            m[(1..,0)].write(&(q * v *(-s)));
+            m[(0,1..)].write(&(v.transpose()*(-s)));
+            m[(1..,1..)].write(&(q-(q*v)*(v.transpose()*s)));
+            m
+        }
+    }
+
+
+    pub fn implicit_symmetric_qr_with_wilkinson_shift(&mut self, with_op: bool) -> Matrix<f64> {
+        let n = self.size().0;
+        let d = (self[(n-2, n-2)] - self[(n-1, n-1)])/2.0;
+        let sign_d = if d>=0.0 { 1.0 } else { -1.0 };
+        let m = self[(n-1, n-1)]-self[(n-1, n-2)].powi(2)/(d+sign_d*(d*d+self[(n-1, n-2)]*self[(n-1, n-2)]).sqrt());
+        let mut x = self[(0,0)] - m;
+        let mut z = self[(1,0)];
+        
+        let mut op = Matrix::zero(n-1, 2);
+
+        for i in 0..n-1 {
+            let (c,s) = Matrix::<f64>::givens_rotation(x,z);
+            let givens =  matrix!(f64; [[c, s],[-s, c]]);
+            let givens = &*givens;
+
+            let start = if i==0 {0} else {i-1};
+            let end = n.min(start+4);
+            let update = givens.transpose() * &self[(i..i+2, start..end)];
+            self[(i..i+2, start..end)].write(&update);
+            let update = &self[(start..end, i..i+2)] * givens;
+            self[(start..end, i..i+2)].write(&update);
+
+
+            if i < n-2 {
+                x = self[(i+1, i)];
+                z = self[(i+2, i)];
+            }
+
+            if with_op {
+                op[(i,0)] = c;
+                op[(i,1)] = s;
+            }
+        }
+        op
+    }
+
+    pub fn symmetric_qr(&mut self, with_op: bool) -> Matrix<f64> {
+        let n = self.size().0;
+        let tolerance = 0.0000000001;
+        let mut op = Matrix::identity(n);
+        self.householder_tridiagonalization(with_op);
+        if with_op {
+            op = Matrix::identity(n);
+            op[(1..,1..)].write( &(self[(2..,..n-2)].extract_householder_vecs()) );
+        };
+
+        for i in 0..n-2 {
+            for j in i+2..n{
+                self[(i, j)] = 0.0;
+                self[(j, i)] = 0.0;
+            }
+        }
+
+        let mut q=0;
+        while q<n {
+            for i in 0..n-1 {
+                if self[(i+1,i)].abs()<tolerance{
+                    self[(i+1, i)] = 0.0;
+                    self[(i, i+1)] = 0.0;
+                }
+            }
+
+            q = (0..n-2)
+                .find( |&i| self[(n-i-1,n-i-2)].abs()>tolerance && self[(n-i-2,n-i-3)].abs()>tolerance )
+                .unwrap_or(n);
+
+            let p = (1..n-q)
+                .rev()
+                .find(|&i| self[(i,i-1)].abs()<tolerance )
+                .unwrap_or(0);
+
+            if q<n {
+                debug_assert!( (n-q)-p > 2);
+                let givens = self[(p..n-q, p..n-q)].implicit_symmetric_qr_with_wilkinson_shift(with_op);
+                if with_op {
+                    for (i, c,s) in (0..givens.size.0).map(|i| (i, givens[(i,0)], givens[(i,1)])) {
+                        let givens =  matrix!(f64; [[c, -s],[s, c]]);
+                        let givens = &*givens;
+                        let update = givens * &op[(i..i+2, ..)];
+                        op[(i..i+2, ..)].write(&update);
+                    }
+                }
+            }
+        }
+        op
+    }
+
+    // pub fn lanzos_tridiagonalization(&self) -> (Matrix<f64>, Matrix<f64>, Matrix<f64>) {
+    //     let mut q = vec![Matrix::zero(self.size().0, 1)];
+    //     q.reserve(self.size().0);
+    //     q.push({
+    //         let mut m = Matrix::new(self.size().0, 1);
+    //         let val = 1.0/((self.size().0) as f64).sqrt();
+    //         for i in 0..self.size().0 {
+    //             m[(i,0)] = val;
+    //         }
+    //         m
+    //     });
+
+    //     let mut alpha: Vec<f64> = vec![0.0];
+    //     alpha.reserve(self.size().0);
+    //     let mut beta: Vec<f64> = vec![1.0];
+    //     beta.reserve(self.size().0);
+        
+    //     let mut r = q[1].clone();
+        
+    //     let mut i = 0;
+    //     while (beta[i]).abs() > 0.00001 && i<20 {
+    //         if i!=0 {
+    //             q.push(r / beta[i]);
+    //         }
+    //         i = i + 1;
+    //         alpha.push(((&*q[i]).transpose() * self).dot( &*q[i] ));
+    //         debug_assert_eq!(alpha.len(), i+1);
+    //         r = {
+    //             let mut tmp = self * &*q[i];
+    //             for j in 0..tmp.size().0 {
+    //                 tmp[(j,0)] -= alpha[i] * q[i][(j,0)] + beta[i-1]*q[i-1][(j,0)];
+    //             }
+    //             tmp
+    //         };
+    //         beta.push( r.two_norm() );
+    //         debug_assert_eq!(beta.len(), i+1);
+
+    //         println!("beta={}", beta[i]);
+    //     }
+
+    //     let mut q_out = Matrix::new(self.size().0, q.len()-1);
+    //     for (j, v) in q.into_iter().skip(1).enumerate() {
+    //         q_out[(.., j)].write(&v);
+    //     }
+
+    //     let mut alpha_out = Matrix::new(i, 1);
+    //     for j in 1..=i {
+    //         alpha_out[(j-1, 0)] = alpha[j];
+    //     }
+
+    //     let mut beta_out = Matrix::new(i-1, 1);
+    //     for j in 1..i {
+    //         beta_out[(j-1, 0)] = beta[j];
+    //     }
+
+    //     (alpha_out, beta_out, q_out)
+    // }
+
+    // pub fn lanzos_tridiagonalization(&self) -> (Matrix<f64>, Matrix<f64>, Matrix<f64>) {
+    //     let n = self.size().0;
+    //     let mut alpha = Vec::new();
+    //     let mut beta = Vec::new();
+    //     let mut q = Vec::new();
+
+    //     // let mut w = {
+    //     //     let mut m = Matrix::new(n, 1);
+    //     //     let val = 1.0/ ((n as f64).sqrt());
+    //     //     for i in 0..n {
+    //     //         m[(i,0)] = val;
+    //     //     }
+    //     //     m
+    //     // };
+
+    //     let mut w = {
+    //         let mut m = Matrix::zero(n, 1);
+    //         m[(0,0)] = 1.0;
+    //         m
+    //     };
+
+    //     q.push(w.clone());
+    //     let mut v = self * &*w;
+
+    //     alpha.push((&*w).transpose().dot(&v));
+
+    //     v = v - (&*w) * *alpha.last().unwrap();
+
+    //     beta.push(v.two_norm());
+
+    //     let mut i=0;
+
+    //     while *beta.last().unwrap() > 0.00000001 && i<self.size().0-1 {
+    //         println!( "beta[{i}]={}", *beta.last().unwrap() );
+    //         for j in 0..n {
+    //             let t = w[(j,0)];
+    //             w[(j,0)] = v[(j,0)] / *beta.last().unwrap();
+    //             v[(j,0)] = - beta.last().unwrap() * t;
+    //         }
+    //         v = v + self * &*w;
+    //         i+=1;
+    //         alpha.push((&*w).transpose().dot(&v));
+    //         v = v - &*w * *alpha.last().unwrap();
+    //         beta.push(v.two_norm());
+
+    //         q.push(w.clone());
+    //     }
+
+    //     let a_out = Matrix::from_array(vec![alpha]).transpose();
+    //     beta.pop();
+    //     let b_out = Matrix::from_array(vec![beta]).transpose();
+    //     let q_out = {
+    //         let mut q_out = Matrix::new(self.size().0, q.len());
+    //         for i in 0..q.len() {
+    //             q_out[(.., i)].write( &q[i] );
+    //         }
+    //         q_out
+    //     };
+
+    //     // for i in 0..q_out.size().1 {
+    //     //     for j in i+1..q_out.size().1 {
+    //     //         let p = q_out[(.., i)].transpose().dot(&q_out[(..,j)]);
+    //     //         assert!(p<0.001, "p={p}");
+    //     //     }
+    //     // }
+        
+    //     (a_out, b_out, q_out)
+    // }
 }
 
-impl std::fmt::Display for Matrix<f64> {
+impl<T: PID+Display> std::fmt::Display for SubMatrix<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let decimals = f.precision().unwrap_or(3);
         write!(f, "\n")?;

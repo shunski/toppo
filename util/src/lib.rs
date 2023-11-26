@@ -1,8 +1,4 @@
-#![allow(unused)]
-
-use std::collections::binary_heap::Iter;
-use std::thread::current;
-
+#[allow(unused)]
 pub mod bitwise {
     pub fn count_ones(mut data: u64) ->  usize {
         let mut count = 0;
@@ -38,7 +34,7 @@ impl BinaryPool {
 
     pub fn from(len: usize, indeces: Vec<usize>) -> BinaryPool {
         if indeces.is_empty() { return BinaryPool::new(len) }
-        if( len < indeces.iter().max().unwrap()/64+1) { panic!("specified length is too small."); }
+        if len < indeces.iter().max().unwrap()/64+1 { panic!("specified length is too small."); }
 
         let data = vec![0; len/64+1];
 
@@ -81,14 +77,14 @@ impl BinaryPool {
         self.data[index/64] &= !(1 << (index % 64));
     }
 
-    pub fn union(mut self, mut other: Self ) -> Self {
+    pub fn union(mut self, other: Self ) -> Self {
         self.check_len(&other);
         self.data.iter_mut().zip(other.data.iter()).for_each(|(x, &y)| *x |= y);
         self.n_elements = self.data.iter().map(|&s| bitwise::count_ones(s)).sum();
         self
     }
 
-    pub fn intersection(mut self, mut other: Self ) -> Self {
+    pub fn intersection(mut self, other: Self ) -> Self {
         self.check_len(&other);
         self.data.iter_mut().zip( other.data.iter() ).for_each(|(x, &y)| *x &= y);
         self.n_elements = self.data.iter().map(|&s| bitwise::count_ones(s)).sum();
@@ -157,7 +153,7 @@ impl<'a> Iterator for BinaryPoolIter<'a> {
     }
 }
 
-use std::fmt::{self, Binary};
+use std::fmt;
 impl fmt::Debug for BinaryPool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "len = {}, ", self.len())?;
@@ -330,8 +326,8 @@ impl<T> fmt::Display for LabeledSet<T>
         write!(f, "{{")?;
         let mut iter = self.iter();
         if let Some(elem) = iter.next() {
-            write!(f, "{}", elem);
-            while let Some(elem) = iter.next() { write!(f, ", {}", elem); }
+            write!(f, "{}", elem)?;
+            while let Some(elem) = iter.next() { write!(f, ", {}", elem)?; }
         }
         write!(f, "}}")?;
         write!(f, "")
@@ -447,7 +443,7 @@ pub trait TupleIterable <'a, T> {
     fn tuple_iter(&'a self, size: usize) -> TupleIterator<'a, T>;
 }
 
-impl<'a, T> TupleIterable<'a, T> for Vec<T> {
+impl<'a, T> TupleIterable<'a, T> for [T] {
     fn tuple_iter(&'a self, size: usize) -> TupleIterator<'a, T> {
         TupleIterator::new(self, size)
     }
@@ -486,14 +482,9 @@ mod tuple_iterator_test {
         assert_eq!(sum, choose(20, 10));
     }
 
-    fn factorial(n: usize) -> usize {
-        if n==0 { return 1; };
-        n * factorial(n-1)
-    }
-
     fn choose(n: usize, k: usize) -> usize {
         let mut out=1;
-        for i in (k+1..=n) {
+        for i in k+1..=n {
             out *= i;
             out /= i-k;
         }

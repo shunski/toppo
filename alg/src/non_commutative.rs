@@ -1,8 +1,7 @@
 use std::iter::Product;
 use std::ops::Mul;
-use std::ops::BitXor;
 
-pub trait Group: Sized + Mul + Mul<Output=Self> + Product + BitXor<i64> {
+pub trait Group: Sized + Mul + Mul<Output=Self> + Product {
     fn identity() -> Self;
     fn inverse_of_gen(self) -> Self;
 

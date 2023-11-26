@@ -1,7 +1,7 @@
 mod mod_impl;
 mod mod_test;
 
-pub trait VertexLabel: std::clone::Clone + std::cmp::Eq {}
+pub trait VertexLabel: std::clone::Clone + std::cmp::Eq + PartialOrd {}
   
 macro_rules! vertex_label_impl {
     ($($t:ty)*) => ($(
@@ -9,17 +9,17 @@ macro_rules! vertex_label_impl {
     )*)
 }
 
-vertex_label_impl!{ String }
+vertex_label_impl!{ String usize }
 
 #[allow(unused)]
-#[derive(Clone, PartialEq, Debug)] 
+#[derive(Clone, PartialEq, Debug, PartialOrd, Eq, Ord)] 
 pub struct Simplex <T: VertexLabel> 
 {
-    dim: usize,
-    vertices_labels: Vec<T>,
+    pub dim: usize,
+    pub vertices_labels: Vec<T>,
 }
 
-use alg::lin_alg::FormalSum;
+use alg::lin_alg::Vector;
 use alg::formal_sum_impl;
 formal_sum_impl!{ Simplex<String> }
 

@@ -1,8 +1,9 @@
 use crate::Complex;
 use crate::graph::*;
 use alg::formal_sum_impl;
-use alg::lin_alg::FormalSum;
+use alg::lin_alg::Vector;
 use alg::lin_alg::Matrix;
+use alg::non_commutative::permutation::ConstPermutation;
 use util::LabeledSet;
 
 #[allow(unused)]
@@ -146,8 +147,8 @@ impl CubicalCplx {
         let mut sign = true;
         for (i, factor) in cell.iter().enumerate().filter(|&(_, factor)| factor.is_edge()) {
             let (mut first_face, mut second_face) = (cell.clone(), cell.clone());
-            first_face[i] = CubeFactor::Vertex(factor.edge().0);
-            second_face[i] = CubeFactor::Vertex(factor.edge().1);
+            first_face[i] = CubeFactor::Vertex(factor.edge()[0]);
+            second_face[i] = CubeFactor::Vertex(factor.edge()[1]);
             boundaries.push((sign, first_face)); boundaries.push((!sign, second_face));
 
             sign = !sign;
@@ -186,7 +187,7 @@ impl CubicalCplx {
 
     pub fn dim_of(&self, branch_idx: usize) -> usize {
         let dim_of_branch = match self.data[branch_idx].val {
-            CubeFactor::Edge(_,_) => 1,
+            CubeFactor::Edge(_) => 1,
             CubeFactor::Vertex(_) => 0,
         };
 
@@ -234,6 +235,7 @@ impl<'a> CubicalCplx {
     }
 }
 
+use std::collections::VecDeque;
 use std::fmt;
 impl fmt::Display for CubicalCplx {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -327,7 +329,7 @@ mod cubical_cells {
 
 impl Complex for CubicalCplx {
     type Cell = Cube;
-    fn boundary_map (&self) -> Vec< (Matrix<i128>, Vec<Self::Cell>) > {
+    fn boundary_map (&self) -> Vec< (Matrix<i64>, Vec<Self::Cell>) > {
         let basis: Vec<Vec<Self::Cell>> = vec![Vec::new(); self.dim+1];
 
         let mut numbering = vec![0; self.data.len()];
@@ -431,23 +433,27 @@ enum MorseProp {
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Cube {
-    factors: Vec<CubeFactor>,
-}
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Cube (Vec<CubeFactor>);
 
 formal_sum_impl!{ Cube }
 
 impl std::ops::Deref for Cube {
     type Target = Vec<CubeFactor>;
     fn deref(&self) -> &Self::Target {
-        &self.factors
+        &self.0
     }
 }
 
 impl std::ops::DerefMut for Cube {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.factors
+        &mut self.0
+    }
+}
+
+impl From<Vec<CubeFactor>> for Cube {
+    fn from(value: Vec<CubeFactor>) -> Self {
+        Self(value)
     }
 }
 
@@ -455,12 +461,12 @@ impl Cube {
     fn from_index( idx: usize, cplx: &UdnMorseCplx ) -> Cube {
         let mut factors: Vec<_> = cplx.factor_iter(idx).collect();
         factors.reverse();
-        Cube { factors: factors }
+        Cube( factors )
     }
 
-    pub fn flow(mut self, graph: &RawSimpleGraph) -> FormalSum<Cube> {
+    pub fn flow(mut self, graph: &RawSimpleGraph) -> Vector<i64, Cube> {
         match self.property(graph) {
-            MorseProp::Collapsible(_) => FormalSum::zero(),
+            MorseProp::Collapsible(_) => Vector::zero(),
             MorseProp::Critical => 1*self,
             MorseProp::Redundant(i) => {
                 // do the special reduction if applicable: if an edge starting from unblocked vertex does not disrespect any vertex, 
@@ -502,19 +508,19 @@ impl Cube {
                 } else {
                     panic!("Implementation of boundary map is wrong. ")
                 };
-                boundary.into_iter().map(|(i, cube)| i*cube.flow(graph)).sum::<FormalSum<_>>()
+                boundary.into_iter().map(|(i, cube)| cube.flow(graph) * i).sum::<Vector<i64,_>>()
             },
         }
     }
 
-    pub fn get_boundary(&self) -> FormalSum<Cube> {
-        let mut boundary = FormalSum::zero();
+    pub fn get_boundary(&self) -> Vector<i64, Cube> {
+        let mut boundary = Vector::zero();
         let mut sign = -1;
-        for (i, &edge) in self.factors.iter().enumerate().filter( |&(_, &f)| f.is_edge() ) {
+        for (i, &edge) in self.0.iter().enumerate().filter( |&(_, &f)| f.is_edge() ) {
             let mut b1 = self.clone(); b1[i] = edge.terminal(); b1.sort();
             let mut b2 = self.clone(); b2[i] = edge.initial();  b2.sort();
 
-            boundary = boundary + sign*( b2 - b1 );
+            boundary = boundary + ( b2 - b1 ) * sign;
             sign *= -1;
         }
 
@@ -522,17 +528,43 @@ impl Cube {
     }
 
     fn property(&self, graph: &RawSimpleGraph) -> MorseProp {
-        let f = self.factors.iter()
+        let f = self.0.iter()
             .enumerate()
             .filter(|&(_, &f)| 
                 ( f.is_vertex() && !f.is_blocked(&self, graph) ) || 
-                ( f.is_edge() && f.is_in_maximal_tree(graph) && ( f.is_order_respecting() || self.factors.iter().all(|&other| !other.is_vertex() || !other.is_disrespected_by(f)) ))
+                ( f.is_edge() && f.is_in_maximal_tree(graph) && ( f.is_order_respecting() || self.0.iter().all(|&other| !other.is_vertex() || !other.is_disrespected_by(f)) ))
             )
             .next();
         match f {
             Some((i, factor)) => if factor.is_vertex() { MorseProp::Redundant(i) } else { MorseProp::Collapsible(i) },
             None => MorseProp::Critical,
         }
+    }
+
+    // This function panics if the cube is not an edge, that is, if the cube is not one dimensional
+    pub fn get_ends(self) -> [Cube; 2] {
+        let mut out = [Self(Vec::new()), Self(Vec::new())];
+
+        let mut edge_count = 0;
+
+        for f in self.0 {
+            match f {
+                CubeFactor::Vertex(_) => {
+                    out[0].push(f); out[1].push(f); 
+                },
+                CubeFactor::Edge([v,w]) => {
+                    out[0].push(CubeFactor::Vertex(v)); 
+                    out[1].push(CubeFactor::Vertex(w));
+                    edge_count += 1;
+                }
+            }
+        }
+
+        if edge_count != 1 {
+            panic!("input to this function must be an edge");
+        }
+
+        out
     }
 }
 
@@ -556,41 +588,41 @@ mod cube_test {
     #[test]
     fn property_test() {
         let graph = graphs_for_tests::k_5_5_with_4_marked_points();
-        assert_eq!( MorseProp::Critical, Cube{ factors: vec![ CubeFactor::Vertex(0), CubeFactor::Vertex(1), CubeFactor::Vertex(2), CubeFactor::Vertex(3)] }.property(&graph) );
-        assert_eq!( MorseProp::Critical, Cube{ factors: vec![ CubeFactor::Edge(6, 9), CubeFactor::Vertex(7), CubeFactor::Vertex(19), CubeFactor::Edge(18, 23)] }.property(&graph) );
-        assert_eq!( MorseProp::Critical, Cube{ factors: vec![ CubeFactor::Edge(6, 9), CubeFactor::Vertex(7), CubeFactor::Vertex(10), CubeFactor::Vertex(11)] }.property(&graph) );
-        assert_eq!( MorseProp::Critical, Cube{ factors: vec![ CubeFactor::Edge(0, 24), CubeFactor::Vertex(1), CubeFactor::Edge(6, 9), CubeFactor::Vertex(7)] }.property(&graph) );
+        assert_eq!( MorseProp::Critical, Cube( vec![ CubeFactor::Vertex(0), CubeFactor::Vertex(1), CubeFactor::Vertex(2), CubeFactor::Vertex(3)] ).property(&graph) );
+        assert_eq!( MorseProp::Critical, Cube( vec![ CubeFactor::Edge([6, 9]), CubeFactor::Vertex(7), CubeFactor::Vertex(19), CubeFactor::Edge([18, 23])] ).property(&graph) );
+        assert_eq!( MorseProp::Critical, Cube( vec![ CubeFactor::Edge([6, 9]), CubeFactor::Vertex(7), CubeFactor::Vertex(10), CubeFactor::Vertex(11)] ).property(&graph) );
+        assert_eq!( MorseProp::Critical, Cube( vec![ CubeFactor::Edge([0, 24]), CubeFactor::Vertex(1), CubeFactor::Edge([6, 9]), CubeFactor::Vertex(7)] ).property(&graph) );
 
-        assert_eq!( MorseProp::Collapsible(1), Cube{ factors: vec![ CubeFactor::Vertex(0), CubeFactor::Edge(6, 9), CubeFactor::Vertex(10), CubeFactor::Vertex(11)] }.property(&graph) );
-        assert_eq!( MorseProp::Collapsible(2), Cube{ factors: vec![ CubeFactor::Vertex(0), CubeFactor::Edge(3, 22), CubeFactor::Edge(6, 9), CubeFactor::Vertex(11)] }.property(&graph) );
+        assert_eq!( MorseProp::Collapsible(1), Cube( vec![ CubeFactor::Vertex(0), CubeFactor::Edge([6, 9]), CubeFactor::Vertex(10), CubeFactor::Vertex(11)] ).property(&graph) );
+        assert_eq!( MorseProp::Collapsible(2), Cube( vec![ CubeFactor::Vertex(0), CubeFactor::Edge([3, 22]), CubeFactor::Edge([6, 9]), CubeFactor::Vertex(11)] ).property(&graph) );
 
-        assert_eq!( MorseProp::Redundant(0), Cube{ factors: vec![ CubeFactor::Vertex(1), CubeFactor::Edge(6, 9), CubeFactor::Vertex(10), CubeFactor::Vertex(11)] }.property(&graph) );
-        assert_eq!( MorseProp::Redundant(0), Cube{ factors: vec![ CubeFactor::Vertex(1), CubeFactor::Edge(3, 22), CubeFactor::Edge(6, 9), CubeFactor::Vertex(11)] }.property(&graph) );
-        assert_eq!( MorseProp::Redundant(1), Cube{ factors: vec![ CubeFactor::Edge(3, 22), CubeFactor::Vertex(5), CubeFactor::Edge(6, 9), CubeFactor::Vertex(11)] }.property(&graph) );
-        assert_eq!( MorseProp::Redundant(2), Cube{ factors: vec![ CubeFactor::Edge(6, 9), CubeFactor::Vertex(7), CubeFactor::Vertex(12), CubeFactor::Vertex(13)] }.property(&graph) );
+        assert_eq!( MorseProp::Redundant(0), Cube( vec![ CubeFactor::Vertex(1), CubeFactor::Edge([6, 9]), CubeFactor::Vertex(10), CubeFactor::Vertex(11)] ).property(&graph) );
+        assert_eq!( MorseProp::Redundant(0), Cube( vec![ CubeFactor::Vertex(1), CubeFactor::Edge([3, 22]), CubeFactor::Edge([6, 9]), CubeFactor::Vertex(11)] ).property(&graph) );
+        assert_eq!( MorseProp::Redundant(1), Cube( vec![ CubeFactor::Edge([3, 22]), CubeFactor::Vertex(5), CubeFactor::Edge([6, 9]), CubeFactor::Vertex(11)] ).property(&graph) );
+        assert_eq!( MorseProp::Redundant(2), Cube( vec![ CubeFactor::Edge([6, 9]), CubeFactor::Vertex(7), CubeFactor::Vertex(12), CubeFactor::Vertex(13)] ).property(&graph) );
     }
 
     #[test]
     fn cubical_boundary_test(){
         // test 1
-        let boundary = Cube{ factors: vec![CubeFactor::Vertex(6), CubeFactor::Vertex(7), CubeFactor::Vertex(9), CubeFactor::Vertex(24)] }.get_boundary();
-        let ans = FormalSum::zero();
+        let boundary = Cube( vec![CubeFactor::Vertex(6), CubeFactor::Vertex(7), CubeFactor::Vertex(9), CubeFactor::Vertex(24)] ).get_boundary();
+        let ans = Vector::zero();
         assert_eq!(boundary, ans);
 
         // test 2
-        let boundary = Cube{ factors: vec![CubeFactor::Edge(6, 9), CubeFactor::Vertex(7), CubeFactor::Vertex(10), CubeFactor::Vertex(11)] }.get_boundary();
-        let boundary: FormalSum<_> = boundary.into_iter().map( |(i, cube)| i*cube ).sum();
-        let ans = Cube{ factors: vec![CubeFactor::Vertex(6), CubeFactor::Vertex(7), CubeFactor::Vertex(10), CubeFactor::Vertex(11)] }
-            - Cube{ factors: vec![CubeFactor::Vertex(7), CubeFactor::Vertex(9), CubeFactor::Vertex(10), CubeFactor::Vertex(11)] };
+        let boundary = Cube( vec![CubeFactor::Edge([6, 9]), CubeFactor::Vertex(7), CubeFactor::Vertex(10), CubeFactor::Vertex(11)] ).get_boundary();
+        let boundary: Vector<i64,_> = boundary.into_iter().map( |(i, cube)| i*cube ).sum();
+        let ans = Cube( vec![CubeFactor::Vertex(6), CubeFactor::Vertex(7), CubeFactor::Vertex(10), CubeFactor::Vertex(11)] )
+            - Cube( vec![CubeFactor::Vertex(7), CubeFactor::Vertex(9), CubeFactor::Vertex(10), CubeFactor::Vertex(11)] );
         assert_eq!(boundary, ans);
 
         // test 3 (a non order-respecting edge)
-        let boundary = Cube{ factors: vec![ CubeFactor::Edge(0, 8), CubeFactor::Vertex(1), CubeFactor::Edge(6, 9), CubeFactor::Vertex(7) ] }.get_boundary();
-        let boundary: FormalSum<_> = boundary.into_iter().map( |(i, cube)| i*cube ).sum();
-        let ans = Cube{ factors: vec![ CubeFactor::Vertex(0), CubeFactor::Vertex(1), CubeFactor::Edge(6,9), CubeFactor::Vertex(7) ] }
-            - Cube{ factors: vec![ CubeFactor::Vertex(1), CubeFactor::Edge(6,9), CubeFactor::Vertex(7), CubeFactor::Vertex(8) ] } 
-            - Cube{ factors: vec![ CubeFactor::Edge(0, 8), CubeFactor::Vertex(1), CubeFactor::Vertex(6), CubeFactor::Vertex(7) ] } 
-            + Cube{ factors: vec![ CubeFactor::Edge(0, 8), CubeFactor::Vertex(1), CubeFactor::Vertex(7), CubeFactor::Vertex(9) ] };
+        let boundary = Cube( vec![ CubeFactor::Edge([0, 8]), CubeFactor::Vertex(1), CubeFactor::Edge([6, 9]), CubeFactor::Vertex(7) ] ).get_boundary();
+        let boundary: Vector<i64,_> = boundary.into_iter().map( |(i, cube)| i*cube ).sum();
+        let ans = Cube( vec![ CubeFactor::Vertex(0), CubeFactor::Vertex(1), CubeFactor::Edge([6,9]), CubeFactor::Vertex(7) ] )
+            - Cube( vec![ CubeFactor::Vertex(1), CubeFactor::Edge([6,9]), CubeFactor::Vertex(7), CubeFactor::Vertex(8) ] ) 
+            - Cube( vec![ CubeFactor::Edge([0, 8]), CubeFactor::Vertex(1), CubeFactor::Vertex(6), CubeFactor::Vertex(7) ] ) 
+            + Cube( vec![ CubeFactor::Edge([0, 8]), CubeFactor::Vertex(1), CubeFactor::Vertex(7), CubeFactor::Vertex(9) ] );
         assert_eq!(boundary, ans);
     }
 
@@ -599,20 +631,20 @@ mod cube_test {
         let graph = graphs_for_tests::k_5_5_with_4_marked_points();
 
         // test 1
-        let critical_cell = Cube{ factors: vec![CubeFactor::Vertex(6), CubeFactor::Vertex(7), CubeFactor::Vertex(9), CubeFactor::Vertex(24)] }.flow( &graph );
-        let ans = 1*Cube{ factors: vec![CubeFactor::Vertex(0), CubeFactor::Vertex(1), CubeFactor::Vertex(2), CubeFactor::Vertex(3)] };
+        let critical_cell = Cube( vec![CubeFactor::Vertex(6), CubeFactor::Vertex(7), CubeFactor::Vertex(9), CubeFactor::Vertex(24)] ).flow( &graph );
+        let ans = 1*Cube( vec![CubeFactor::Vertex(0), CubeFactor::Vertex(1), CubeFactor::Vertex(2), CubeFactor::Vertex(3)] );
         assert_eq!(critical_cell, ans);
 
         // test 2
-        let critical_cell = Cube{ factors: vec![CubeFactor::Edge(6, 9), CubeFactor::Vertex(7), CubeFactor::Vertex(19), CubeFactor::Vertex(23)] }.flow( &graph );
-        let ans = 1*Cube{ factors: vec![CubeFactor::Edge(6,9), CubeFactor::Vertex(7), CubeFactor::Vertex(10), CubeFactor::Vertex(11)] };
+        let critical_cell = Cube( vec![CubeFactor::Edge([6, 9]), CubeFactor::Vertex(7), CubeFactor::Vertex(19), CubeFactor::Vertex(23)] ).flow( &graph );
+        let ans = 1*Cube( vec![CubeFactor::Edge([6,9]), CubeFactor::Vertex(7), CubeFactor::Vertex(10), CubeFactor::Vertex(11)] );
         assert_eq!(critical_cell, ans);
 
         // test 3 (a non order-respecting edge)
-        let critical_cell = Cube{ factors: vec![ CubeFactor::Edge(0, 8), CubeFactor::Vertex(1), CubeFactor::Vertex(2), CubeFactor::Vertex(9) ] }.flow( &graph );
-        let critical_cell: FormalSum<_> = critical_cell.into_iter().map( |(i, cube)| i*cube ).sum();
-        let ans = Cube{ factors: vec![ CubeFactor::Edge(0, 8), CubeFactor::Vertex(1), CubeFactor::Vertex(2), CubeFactor::Vertex(3) ] }
-            + Cube{ factors: vec![ CubeFactor::Vertex(0), CubeFactor::Vertex(1), CubeFactor::Edge(6,9), CubeFactor::Vertex(7) ] };
+        let critical_cell = Cube( vec![ CubeFactor::Edge([0, 8]), CubeFactor::Vertex(1), CubeFactor::Vertex(2), CubeFactor::Vertex(9) ] ).flow( &graph );
+        let critical_cell: Vector<i64,_> = critical_cell.into_iter().map( |(i, cube)| i*cube ).sum();
+        let ans = Cube( vec![ CubeFactor::Edge([0, 8]), CubeFactor::Vertex(1), CubeFactor::Vertex(2), CubeFactor::Vertex(3) ] )
+            + Cube( vec![ CubeFactor::Vertex(0), CubeFactor::Vertex(1), CubeFactor::Edge([6,9]), CubeFactor::Vertex(7) ] );
         assert_eq!(critical_cell, ans);
     }
 
@@ -621,22 +653,22 @@ mod cube_test {
         let graph = graphs_for_tests::k_5_5_with_4_marked_points();
 
         // test 1
-        let two_cell = Cube{ factors: vec![CubeFactor::Edge(3, 13), CubeFactor::Edge(6, 9), CubeFactor::Vertex(7), CubeFactor::Vertex(10)] };
+        let two_cell = Cube( vec![CubeFactor::Edge([3, 13]), CubeFactor::Edge([6, 9]), CubeFactor::Vertex(7), CubeFactor::Vertex(10)] );
         let boundary = two_cell.get_boundary();
-        let boundary = boundary.into_iter().map(|(i, x)| i * x.flow(&graph) ).sum::<FormalSum<_>>();
-        let boundary = boundary.into_iter().map(|(i, x)| i * x.get_boundary() ).sum::<FormalSum<_>>();
-        let mut boundary = boundary.into_iter().map(|(i, x)| i * x.flow(&graph) ).sum::<FormalSum<_>>();
+        let boundary = boundary.into_iter().map(|(i, x)| x.flow(&graph) * i ).sum::<Vector<i64,_>>();
+        let boundary = boundary.into_iter().map(|(i, x)| x.get_boundary() * i ).sum::<Vector<i64,_>>();
+        let mut boundary = boundary.into_iter().map(|(i, x)| x.flow(&graph) * i ).sum::<Vector<i64,_>>();
         boundary.iter_mut().for_each(|(_, cube)| cube.sort() );
-        // let boundary: FormalSum<_> = boundary[];
-        assert_eq!(boundary, FormalSum::zero() );
+        // let boundary: Vector<i64,_> = boundary[];
+        assert_eq!(boundary, Vector::zero() );
 
         // test 2
-        let two_cell = Cube{ factors: vec![ CubeFactor::Edge(0, 24), CubeFactor::Edge(3, 13), CubeFactor::Edge(6, 9), CubeFactor::Vertex(7) ] };
+        let two_cell = Cube( vec![ CubeFactor::Edge([0, 24]), CubeFactor::Edge([3, 13]), CubeFactor::Edge([6, 9]), CubeFactor::Vertex(7) ] );
         let boundary = two_cell.get_boundary();
-        let boundary = boundary.into_iter().map(|(i, x)| i * x.flow(&graph) ).sum::<FormalSum<_>>();
-        let boundary = boundary.into_iter().map(|(i, x)| i * x.get_boundary() ).sum::<FormalSum<_>>();
-        let boundary = boundary.into_iter().map(|(i, x)| i * x.flow(&graph) ).sum::<FormalSum<_>>();
-        assert_eq!(boundary, FormalSum::zero() );
+        let boundary = boundary.into_iter().map(|(i, x)| x.flow(&graph) * i ).sum::<Vector<i64,_>>();
+        let boundary = boundary.into_iter().map(|(i, x)| x.get_boundary() * i ).sum::<Vector<i64,_>>();
+        let boundary = boundary.into_iter().map(|(i, x)| x.flow(&graph) * i ).sum::<Vector<i64,_>>();
+        assert_eq!(boundary, Vector::zero() );
 
 
         use crate::graph;
@@ -658,53 +690,53 @@ mod cube_test {
 
         // test 3
         // {[0 11], [27 30], 28, 29} - {[0 11], [22 25], 23, 26}
-        let two_cell = Cube{ factors: vec![CubeFactor::Edge(0, 11), CubeFactor::Edge(27, 30), CubeFactor::Vertex(28), CubeFactor::Vertex(29)] }
-            - Cube{ factors: vec![CubeFactor::Edge(0, 11), CubeFactor::Edge(22, 25), CubeFactor::Vertex(23), CubeFactor::Vertex(26)] };
-        let mut boundary = two_cell.into_iter().map(|(i, x)| i * x.get_boundary() ).sum::<FormalSum<_>>();
-        boundary = boundary.into_iter().map(|(i, x)| i * x.flow(&graph) ).sum::<FormalSum<_>>();
+        let two_cell = Cube( vec![CubeFactor::Edge([0, 11]), CubeFactor::Edge([27, 30]), CubeFactor::Vertex(28), CubeFactor::Vertex(29)] )
+            - Cube( vec![CubeFactor::Edge([0, 11]), CubeFactor::Edge([22, 25]), CubeFactor::Vertex(23), CubeFactor::Vertex(26)] );
+        let mut boundary = two_cell.into_iter().map(|(i, x)| x.get_boundary() * i ).sum::<Vector<i64,_>>();
+        boundary = boundary.into_iter().map(|(i, x)| x.flow(&graph) * i ).sum::<Vector<i64,_>>();
         boundary.iter_mut().for_each(|(_, cube)| cube.sort() );
-        assert_eq!(boundary, FormalSum::zero() );
+        assert_eq!(boundary, Vector::zero() );
 
         // test 4
         // - {[0 11], 1, [17 20], 18} - {[0 11], [17 20], 18, 21} - {[9 12], 10, [17 20], 18}
-        let two_cell = -Cube{ factors: vec![CubeFactor::Edge(0, 11), CubeFactor::Vertex(1), CubeFactor::Edge(17, 20), CubeFactor::Vertex(18)] }
-            - Cube{ factors: vec![CubeFactor::Edge(0, 11), CubeFactor::Edge(17, 20), CubeFactor::Vertex(18), CubeFactor::Vertex(21)] }
-            - Cube{ factors: vec![CubeFactor::Edge(9, 12), CubeFactor::Vertex(10), CubeFactor::Edge(17, 20), CubeFactor::Vertex(18)] };
-        let mut boundary = two_cell.into_iter().map(|(i, x)| i * x.get_boundary() ).sum::<FormalSum<_>>();
-        boundary = boundary.into_iter().map(|(i, x)| i * x.flow(&graph) ).sum::<FormalSum<_>>();
+        let two_cell = -Cube( vec![CubeFactor::Edge([0, 11]), CubeFactor::Vertex(1), CubeFactor::Edge([17, 20]), CubeFactor::Vertex(18)] )
+            - Cube( vec![CubeFactor::Edge([0, 11]), CubeFactor::Edge([17, 20]), CubeFactor::Vertex(18), CubeFactor::Vertex(21)] )
+            - Cube( vec![CubeFactor::Edge([9, 12]), CubeFactor::Vertex(10), CubeFactor::Edge([17, 20]), CubeFactor::Vertex(18)] );
+        let mut boundary = two_cell.into_iter().map(|(i, x)| x.get_boundary() * i ).sum::<Vector<i64,_>>();
+        boundary = boundary.into_iter().map(|(i, x)| x.flow(&graph) * i ).sum::<Vector<i64,_>>();
         boundary.iter_mut().for_each(|(_, cube)| cube.sort() );
-        assert_eq!(boundary, FormalSum::zero() );
+        assert_eq!(boundary, Vector::zero() );
 
         // test 6
         // {[3 24], 4, [14 31], 15}
         // let two_cell = 
-        //     Cube{ factors: vec![CubeFactor::Edge(0, 19), CubeFactor::Edge(6, 29), CubeFactor::Vertex(7), CubeFactor::Edge(14, 31)] }
-        //     + Cube{ factors: vec![CubeFactor::Edge(3, 24), CubeFactor::Edge(6, 29), CubeFactor::Vertex(7), CubeFactor::Edge(14, 31)] }
-        //     - Cube{ factors: vec![CubeFactor::Edge(3, 24), CubeFactor::Vertex(4), CubeFactor::Edge(6, 29), CubeFactor::Edge(14, 31)] }
-        //     - Cube{ factors: vec![CubeFactor::Edge(0, 19), CubeFactor::Vertex(1), CubeFactor::Edge(6, 29), CubeFactor::Edge(14, 31)] }
-        //     + Cube{ factors: vec![CubeFactor::Edge(0, 11), CubeFactor::Edge(6, 29), CubeFactor::Edge(17, 20), CubeFactor::Vertex(18)] }
-        //     + Cube{ factors: vec![CubeFactor::Edge(0, 11), CubeFactor::Edge(6, 29), CubeFactor::Edge(22, 25), CubeFactor::Vertex(23)] }
-        //     - Cube{ factors: vec![CubeFactor::Edge(0, 11), CubeFactor::Edge(14, 31), CubeFactor::Edge(17, 20), CubeFactor::Vertex(18)] }
-        //     - Cube{ factors: vec![CubeFactor::Edge(0, 11), CubeFactor::Edge(14, 31), CubeFactor::Edge(22, 25), CubeFactor::Vertex(23)] }
-        //     - Cube{ factors: vec![CubeFactor::Edge(0, 19), CubeFactor::Edge(9, 12), CubeFactor::Vertex(10), CubeFactor::Edge(14, 31)] }
-        //     + Cube{ factors: vec![CubeFactor::Edge(3, 24), CubeFactor::Edge(9, 12), CubeFactor::Vertex(10), CubeFactor::Edge(14, 31)] };
-        // let mut boundary = two_cell.into_iter().map(|(i, x)| i * x.get_boundary() ).sum::<FormalSum<_>>();
-        // boundary = boundary.into_iter().map(|(i, x)| i * x.flow(&graph) ).sum::<FormalSum<_>>();
+        //     Cube( vec![CubeFactor::Edge(0, 19), CubeFactor::Edge(6, 29), CubeFactor::Vertex(7), CubeFactor::Edge(14, 31)] }
+        //     + Cube( vec![CubeFactor::Edge(3, 24), CubeFactor::Edge(6, 29), CubeFactor::Vertex(7), CubeFactor::Edge(14, 31)] }
+        //     - Cube( vec![CubeFactor::Edge(3, 24), CubeFactor::Vertex(4), CubeFactor::Edge(6, 29), CubeFactor::Edge(14, 31)] }
+        //     - Cube( vec![CubeFactor::Edge(0, 19), CubeFactor::Vertex(1), CubeFactor::Edge(6, 29), CubeFactor::Edge(14, 31)] }
+        //     + Cube( vec![CubeFactor::Edge(0, 11), CubeFactor::Edge(6, 29), CubeFactor::Edge(17, 20), CubeFactor::Vertex(18)] }
+        //     + Cube( vec![CubeFactor::Edge(0, 11), CubeFactor::Edge(6, 29), CubeFactor::Edge(22, 25), CubeFactor::Vertex(23)] }
+        //     - Cube( vec![CubeFactor::Edge(0, 11), CubeFactor::Edge(14, 31), CubeFactor::Edge(17, 20), CubeFactor::Vertex(18)] }
+        //     - Cube( vec![CubeFactor::Edge(0, 11), CubeFactor::Edge(14, 31), CubeFactor::Edge(22, 25), CubeFactor::Vertex(23)] }
+        //     - Cube( vec![CubeFactor::Edge(0, 19), CubeFactor::Edge(9, 12), CubeFactor::Vertex(10), CubeFactor::Edge(14, 31)] }
+        //     + Cube( vec![CubeFactor::Edge(3, 24), CubeFactor::Edge(9, 12), CubeFactor::Vertex(10), CubeFactor::Edge(14, 31)] };
+        // let mut boundary = two_cell.into_iter().map(|(i, x)| i * x.get_boundary() ).sum::<Vector<i64,_>>();
+        // boundary = boundary.into_iter().map(|(i, x)| i * x.flow(&graph) ).sum::<Vector<i64,_>>();
         // println!("{}", boundary);
-        // assert_eq!(boundary, FormalSum::zero() );
+        // assert_eq!(boundary, Vector::zero() );
 
         let two_cell = 
-            1*Cube{ factors: vec![CubeFactor::Edge(9, 12), CubeFactor::Vertex(10), CubeFactor::Edge(22, 25), CubeFactor::Vertex(23)] };
-        let mut boundary = two_cell.into_iter().map(|(i, x)| i * x.get_boundary() ).sum::<FormalSum<_>>();
-        boundary = boundary.into_iter().map(|(i, x)| i * x.flow(&graph) ).sum::<FormalSum<_>>();
+            1*Cube( vec![CubeFactor::Edge([9, 12]), CubeFactor::Vertex(10), CubeFactor::Edge([22, 25]), CubeFactor::Vertex(23)] );
+        let mut boundary = two_cell.into_iter().map(|(i, x)| x.get_boundary() * i ).sum::<Vector<i64,_>>();
+        boundary = boundary.into_iter().map(|(i, x)| x.flow(&graph) * i ).sum::<Vector<i64,_>>();
         println!("{}", boundary);
-        assert_eq!(boundary, FormalSum::zero() );
+        assert_eq!(boundary, Vector::zero() );
     }
 }
 
 
 pub struct UdnMorseCplx {
-    pub factor_pool: SimpleGraph,
+    pub factor_pool: SimpleGraph, // the base graph. subdivided in 'fn new(..)'
     data: Vec<Branch>,
     first_branch_indeces: Vec<usize>,
     final_branch_indeces: Vec<usize>,
@@ -875,7 +907,7 @@ impl UdnMorseCplx {
                 if new_vertex < self.factor_pool.n_vertices() { factors_added.push( CubeFactor::Vertex( curr_factor.vertex()+1 ) ); }
             } else if curr_factor.is_in_maximal_tree(&self.factor_pool) {
                 // Coming here means that 'curr_factor' is an edge in the maximal tree.
-                let (_, j) = curr_factor.edge(); // get two ends of the edge
+                let [_, j] = curr_factor.edge(); // get two ends of the edge
                 // add vertices (no edges will be added)
                 self.factor_pool
                     .vertex_iter()
@@ -885,7 +917,7 @@ impl UdnMorseCplx {
                 if j+1<self.factor_pool.n_vertices() { factors_added.push( CubeFactor::Vertex(j+1) )}; // add a vertex blocked by the initial vertex of the edge
             } else {
                 // Coming here means that 'curr_factor' is an edge not in the maximal tree.
-                let (_, j) = curr_factor.edge(); // get two ends of the edge
+                let [_, j] = curr_factor.edge(); // get two ends of the edge
                 // add vertices (no edges will be added)
                 self.factor_pool
                     .vertex_iter()
@@ -909,7 +941,7 @@ impl UdnMorseCplx {
 
     pub fn dim_of(&self, branch_idx: usize) -> usize {
         let dim_of_branch = match self.data[branch_idx].val {
-            CubeFactor::Edge(_,_) => 1,
+            CubeFactor::Edge(_) => 1,
             CubeFactor::Vertex(_) => 0,
         };
 
@@ -941,11 +973,11 @@ impl UdnMorseCplx {
         branch_idx
     }
 
-    fn get_boundary_of(&self, branch_idx: usize) -> FormalSum<Cube> {
+    fn get_boundary_of(&self, branch_idx: usize) -> Vector<i64, Cube> {
         let boundary = Cube::from_index(branch_idx, self).get_boundary();
-        let mut boundary = boundary.into_iter().map(|(i, cube)| i * cube.flow(&self.factor_pool) ).sum::<FormalSum<_>>();
+        let mut boundary = boundary.into_iter().map(|(i, cube)| cube.flow(&self.factor_pool) * i ).sum::<Vector<i64,_>>();
         boundary.iter_mut().for_each( |(_, cube)| cube.sort() );
-        let boundary = boundary.into_iter().map(|(i, cube)| i*cube ).sum::<FormalSum<_>>();
+        let boundary = boundary.into_iter().map(|(i, cube)| i*cube ).sum::<Vector<i64,_>>();
 
         boundary
     }
@@ -956,9 +988,114 @@ impl UdnMorseCplx {
             .map(|&i| Cube::from_index(i, &self) )
             .collect()
     }
+
+    // pub fn get_edge_path_of_edge_in_maximal_tree(&self, c: Cube) -> Vec<Vec<[usize; 2]>> {
+    //     assert!(
+    //         c.0.iter().filter(|f| f.is_edge()).count() == 1,
+    //         "The input must be a critical edge, but it is a vertex."
+    //     );
+
+    //     // get two ends of c
+    //     let mut non_order_respecting_edge = c.0.iter().find(|&&f| f.is_edge() ).unwrap().edge();
+    //     non_order_respecting_edge.swap(0, 1); // Now the second element is smaller than the first.
+
+    //     let mut path = VecDeque::from([vec![non_order_respecting_edge]]);
+
+    //     let first_snake_len = c.iter()
+    //         .filter(|f| f.is_vertex())
+    //         .filter(|f| (non_order_respecting_edge[1]..non_order_respecting_edge[0]).contains(&f.vertex()))
+    //         .count();
+
+    //     let first_snake_head = c.iter()
+    //         .filter(|f| f.is_vertex())
+    //         .map(|f| f.vertex() )
+    //         .filter(|v| (non_order_respecting_edge[1]..non_order_respecting_edge[0]).contains(&v))
+    //         .max()
+    //         .unwrap();
+
+    //     let second_snake_len = c.iter()
+    //         .filter(|f| f.is_vertex())
+    //         .filter(|f| f.vertex() > non_order_respecting_edge[0])
+    //         .count();
+    //     let second_snake_head = non_order_respecting_edge[0] + second_snake_len;
+
+    //     let stationary_vertices_len = c.len()-first_snake_len - second_snake_len - 1;
+
+    //     // add some motions to the non-order-respecting motion
+    //     path.front_mut().unwrap().append(
+    //         &mut (non_order_respecting_edge[0]..non_order_respecting_edge[0]+second_snake_len).map(|i| [i+1, i] ).collect::<Vec<_>>()
+    //     );
+
+    //     // generating motions before the non-order-respecting motion
+    //     let mut outward_path = VecDeque::new();
+    //     if first_snake_len != 0 {
+    //         outward_path = self.generate_path::<false>(first_snake_head, first_snake_len, stationary_vertices_len);
+    //     }
+    //     let mut path_of_second_snake = self.generate_path::<false>(second_snake_head, second_snake_len+1, first_snake_len + stationary_vertices_len);
+    //     for (p1, p2) in outward_path.iter_mut().rev().skip(first_snake_len).zip(path_of_second_snake.iter_mut().rev()) {
+    //         p1.append(p2);
+    //     }
+    //     path.front_mut().unwrap().append(&mut outward_path.pop_back().unwrap());
+    //     outward_path.append(&mut path);
+    //     path = outward_path;
+
+    //     // generating motions after the non-order-respecting motion
+    //     let mut return_path = self.generate_path::<true>(first_snake_head, first_snake_len+1, stationary_vertices_len);
+    //     if second_snake_len != 0 { 
+    //         path_of_second_snake = self.generate_path::<true>(second_snake_head-1, second_snake_len, first_snake_len + stationary_vertices_len + 1);
+    //     }
+    //     for (p1, p2) in return_path.iter_mut().skip(first_snake_len).zip(path_of_second_snake.iter_mut()) {
+    //         p1.append(p2);
+    //     }
+    //     path.append(&mut return_path);
+
+    //     path
+    // }
+
+    // pub fn get_edge_path_of_edge_not_in_maximal_tree(&self, c: Cube) -> Vec<Vec<[usize; 2]>> {
+    //     assert!(
+    //         c.0.iter().filter(|f| f.is_edge()).count() == 1,
+    //         "The input must be a critical edge, but it is a vertex."
+    //     );
+
+    //     let edge = c.0.iter().find(|&&f| f.is_edge() ).unwrap().edge();
+    //     let path = VecDeque::new();
+    //     path
+    // }
+
+    fn generate_path<const FORWARD: bool>(&self, snake_head: usize, snake_len: usize, flow_terminal: usize) -> VecDeque<Vec<[usize; 2]>>{
+
+        assert!(snake_len!=0);
+        let mut path = VecDeque::new();
+        let mut path_of_last_vertex = Vec::new();
+        let mut curr = snake_head;
+        while curr > flow_terminal {
+            // flow to the terminal
+            let terminal = (0..curr).rev()
+                .find(|&i| self.factor_pool.contains(i, curr) && self.factor_pool.maximal_tree_contains([i, curr]) )
+                .unwrap();
+
+            if FORWARD {
+                path_of_last_vertex.push( [curr, terminal] );
+            } else {
+                path_of_last_vertex.push( [terminal, curr] );
+            }
+            curr = terminal;
+        }
+
+        (0..path_of_last_vertex.len() - snake_len + 1)
+            .map(|i| (i..i+snake_len).map(|j| path_of_last_vertex[j]).collect::<Vec<_>>() )
+            .for_each(|edge| if FORWARD {
+                    path.push_back(edge)
+                } else {
+                    path.push_front(edge)
+                } );
+
+        path
+    }
 }
 
-struct UdnMorseFactorIter<'a> {
+pub struct UdnMorseFactorIter<'a> {
     cplx: &'a UdnMorseCplx,
     curr_idx: usize,
     is_done: bool,
@@ -982,7 +1119,7 @@ impl<'a> Iterator for UdnMorseFactorIter<'a> {
 }
 
 impl<'a> UdnMorseCplx {
-    fn factor_iter( &'a self, branch_idx: usize ) -> UdnMorseFactorIter<'a> {
+    pub fn factor_iter( &'a self, branch_idx: usize ) -> UdnMorseFactorIter<'a> {
         UdnMorseFactorIter {
             cplx: self,
             curr_idx: branch_idx,
@@ -1016,6 +1153,125 @@ impl fmt::Display for UdnMorseCplx {
 }
 
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct EdgePath (Vec<Vec<[usize; 2]>>);
+
+impl EdgePath {
+    pub fn trivial_path() -> Self {
+        Self(Vec::new())
+    }
+    pub fn reduce_to_geodesic(self) -> Self {
+        let mut out = vec![Vec::new()];
+
+        let commute = |v: &[[usize; 2]], w: &[usize; 2]| -> bool {
+            for i in v {
+                if i[0]==w[1] || i[1]==w[0]|| i[1]==w[1] || i[0]==w[0] {
+                    return false;
+                }
+            }
+            true
+        };
+
+        let composable = |v: &[[usize; 2]], w: &[usize; 2]| -> bool {
+            for i in v {
+                if i[1]==w[0] || i[0]==w[1] || i[1]==w[1] || i[0]==w[0] {
+                    return false;
+                }
+            }
+            true
+        };
+
+        let cancelable = |v: &[usize; 2], w: &[usize; 2]| -> bool {
+            if v[1]==w[0] && v[0]==w[1] {
+                true
+            } else {
+                false
+            }
+        };
+
+        let mut some_canceled = false;
+
+        for step in self.0.into_iter().map(|f| f.into_iter()).flatten() {
+            if let Some(i) = (0..out.len()).rev().find(|&i| !commute(&out[i], &step)) {
+                if composable(&out[i], & step) {
+                    out[i].push(step);
+                } else if let Some(idx) = (0..out[i].len()).find(|&j| cancelable(&out[i][j], &step)) {
+                    some_canceled = true;
+
+                    out[i].remove(idx);
+                    if out[i].is_empty() {
+                        out.remove(i);
+                    }
+                } else if i+1 == out.len() {
+                    out.push(vec![step]);
+                } else {
+                    out[i+1].push(step);
+                }
+            } else {
+                out[0].push(step);
+            };
+        }
+
+        if some_canceled {
+            Self(out).reduce_to_geodesic()
+        } else {
+            Self(out)
+        }
+    }
+
+    pub fn composed_with(mut self, mut other: Self) -> Self {
+        self.0.append(&mut other.0);
+        self
+    }
+
+    pub fn evaluate_permutation<const N: usize>(&self) -> ConstPermutation<N> {
+        let mut out = {
+            let mut out = [0; N];
+            (0..N).for_each(|i| out[i]=i );
+            out
+        };
+
+        for step in self.iter() {
+            let mut next = out;
+            for edge in step.iter() {
+                let update_idx = (0..N).find(|&i| out[i] == edge[0]).unwrap_or_else(|| panic!("path={self:?}, \n step = {step:?},\n edge={edge:?}") );
+                next[update_idx] = edge[1];
+            }
+            out = next;
+        }
+
+        ConstPermutation::from(out)
+    }
+
+    pub fn inverse(mut self) -> Self {
+        // reverse each step
+        for edge in self.0.iter_mut().map(|step| step.iter_mut()).flatten() {
+            edge.swap(0, 1);
+        }
+
+        for step in self.0.iter_mut() {
+            step.reverse();
+        }
+
+        let path = Self( self.0.into_iter().rev().collect::<Vec<_>>() );
+        path.reduce_to_geodesic()
+    }
+}
+
+impl std::ops::Deref for EdgePath {
+    type Target = Vec<Vec<[usize; 2]>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<Vec<Vec<[usize; 2]>>> for EdgePath {
+    fn from(value: Vec<Vec<[usize; 2]>>) -> Self {
+        EdgePath(value)
+    }
+}
+
+
 #[cfg(test)]
 mod udn_morse_cplx_test {
     use crate::cubical::*;
@@ -1030,7 +1286,7 @@ mod udn_morse_cplx_test {
 
         // check the morse complex
         // - the 0-cell
-        use crate::graph::CubeFactor::{ Vertex };
+        use crate::graph::CubeFactor::Vertex;
         let zero_cells = complex.final_branch_indeces.iter().filter(|&&idx| complex.dim_of(idx)==0 ).map(|&idx| complex.get_cell_from_idx(idx)).collect::<Vec<_>>();
         assert_eq!( zero_cells, vec![ vec![Vertex(0), Vertex(1), Vertex(2), Vertex(3)]] );
 
@@ -1048,7 +1304,7 @@ mod udn_morse_cplx_test {
 
         // check the morse complex
         // - the 0-cell
-        use crate::graph::CubeFactor::{ Vertex };
+        use crate::graph::CubeFactor::Vertex;
         let zero_cells = complex.final_branch_indeces.iter().filter(|&&idx| complex.dim_of(idx)==0 ).map(|&idx| complex.get_cell_from_idx(idx)).collect::<Vec<_>>();
         assert_eq!( zero_cells, vec![ vec![Vertex(0), Vertex(1), Vertex(2), Vertex(3)]] );
 
@@ -1080,7 +1336,7 @@ mod udn_morse_cplx_test {
 
         // 1-cells
         let one_cells = complex.final_branch_indeces.iter().filter(|&&idx| complex.dim_of(idx)==1 ).map(|&idx| complex.get_cell_from_idx(idx)).collect::<Vec<_>>();
-        assert_eq!( one_cells, vec![ vec![Vertex(0), Edge(2,8)], vec![Edge(0,5), Vertex(1)], vec![Edge(4,6), Vertex(5)], vec![Edge(2,8), Vertex(3)], vec![Edge(7,9), Vertex(8)], vec![Edge(0,9), Vertex(1)] ] );
+        assert_eq!( one_cells, vec![ vec![Vertex(0), Edge([2,8])], vec![Edge([0,5]), Vertex(1)], vec![Edge([4,6]), Vertex(5)], vec![Edge([2,8]), Vertex(3)], vec![Edge([7,9]), Vertex(8)], vec![Edge([0,9]), Vertex(1)] ] );
 
 
         assert!( complex.final_branch_indeces.iter().all(|&idx| Cube::from_index(idx, &complex).property(&complex.factor_pool)==MorseProp::Critical) );
@@ -1103,7 +1359,7 @@ mod udn_morse_cplx_test {
 
         // 1-cells
         let one_cells = complex.final_branch_indeces.iter().filter(|&&idx| complex.dim_of(idx)==1 ).map(|&idx| complex.get_cell_from_idx(idx)).collect::<Vec<_>>();
-        assert_eq!( one_cells, vec![ vec![Vertex(0), Vertex(1), Edge(2,5)], vec![Vertex(0), Edge(2,5), Vertex(3)], vec![Edge(2,5), Vertex(3), Vertex(4)] ] );
+        assert_eq!( one_cells, vec![ vec![Vertex(0), Vertex(1), Edge([2,5])], vec![Vertex(0), Edge([2,5]), Vertex(3)], vec![Edge([2,5]), Vertex(3), Vertex(4)] ] );
 
         // 2-cells
         let two_cells = complex.final_branch_indeces.iter().filter(|&&idx| complex.dim_of(idx)==2 ).map(|&idx| complex.get_cell_from_idx(idx)).collect::<Vec<_>>();
@@ -1119,7 +1375,7 @@ mod udn_morse_cplx_test {
 
 impl Complex for UdnMorseCplx {
     type Cell = Cube;
-    fn boundary_map (&self) -> Vec< (Matrix<i128>, Vec<Self::Cell>) > {
+    fn boundary_map (&self) -> Vec< (Matrix<i64>, Vec<Self::Cell>) > {
         let mut numbering = vec![0; self.data.len()];
         let mut counter = vec![0; self.dim+1];
         self.final_branch_indeces.iter().for_each(|&idx| {
@@ -1140,7 +1396,7 @@ impl Complex for UdnMorseCplx {
             let dim = self.dim_of(i);
             // encode the boundary information
             boundary.into_iter().for_each(|(coeff, cube)| {
-                let coeff = coeff as i128;
+                let coeff = coeff as i64;
                 let j = self.get_index_of(&cube);
                 let val = boundary_maps[dim][( numbering[j], numbering[i] )];
                 boundary_maps[dim][( numbering[j],numbering[i] )] = val+coeff;

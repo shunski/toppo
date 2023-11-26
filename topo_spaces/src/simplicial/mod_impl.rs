@@ -384,8 +384,8 @@ use alg::lin_alg::Matrix;
 impl<T: VertexLabel> Complex for SimplicialCplx<T> 
 {
     type Cell = Simplex<T>;
-    fn boundary_map(&self) -> Vec<( Matrix<i128>, Vec<Self::Cell> )> {
-        let mut boundary_maps: Vec<Matrix<i128>> = vec![Matrix::zero(1,1); self.dim()+1];
+    fn boundary_map(&self) -> Vec<( Matrix<i64>, Vec<Self::Cell> )> {
+        let mut boundary_maps: Vec<Matrix<i64>> = vec![Matrix::zero(1,1); self.dim()+1];
         let mut basis: Vec<Vec<Simplex<T>>> = vec![Vec::new(); self.dim()+1];
 
         let mut n_cells = self.get_i_cells(self.dim(), None);

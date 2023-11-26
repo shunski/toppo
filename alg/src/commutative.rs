@@ -59,10 +59,10 @@ reals_symbol_impl! { f64 }
 
 
 // Rational numbers
-#[derive(PartialEq, Eq, Copy, Clone)]
+#[derive(PartialEq, Eq, Copy, Clone, Hash)]
 pub struct Rational {
     numerator: u64,
-    denumerator: u64,
+    denominator: u64,
     sign: bool,
 }
 
@@ -110,9 +110,7 @@ pub trait PID:
     + AddAssign + SubAssign + MulAssign
     + Add<Output=Self> + Sub<Output=Self> + Mul<Output=Self> + Neg<Output=Self>
     + PartialEq + Sum + Product
-    + Sized + Copy 
-    + std::fmt::Debug
-    + std::fmt::Display
+    + Sized + Clone
     + Symbol
 {
     fn is_prime(self) -> bool;
@@ -190,17 +188,17 @@ macro_rules! pid_impl_for_fields {
 pid_impl_for_fields!{ Rational f64 }
 
 #[allow(unused)]
-fn gcd<T: PID>(a: T, b: T) -> T {
+fn gcd<T: PID + Copy>(a: T, b: T) -> T {
     if a == T::zero() { return b.simplify().1 };
     let (_, r) = b.euclid_div(a);
     gcd(r, a)
 } 
 
-pub fn bezout_identity<T: PID>(a: T, b: T) -> (T, T, T) { // output = (gcd(a, b), x, y)
+pub fn bezout_identity<T: PID+Copy>(a: T, b: T) -> (T, T, T) { // output = (gcd(a, b), x, y)
     bezout_identity_rec(a, b, T::one(), T::zero(), T::zero(), T::one())
 }
 
-fn bezout_identity_rec<T: PID>(a: T, b: T, x1: T, x2: T, y1: T, y2: T) -> (T, T, T) {
+fn bezout_identity_rec<T: PID+Copy>(a: T, b: T, x1: T, x2: T, y1: T, y2: T) -> (T, T, T) {
     if a == T::zero() { 
         let (unit, b) = b.simplify();
         return (b, x2.euclid_div(unit).0, y2.euclid_div(unit).0)
