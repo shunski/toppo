@@ -400,12 +400,12 @@ impl<T: PID> ops::Mul for &SubMatrix<T> {
 
 
 
-/// multiplication between
-///     (1) &SubMatrix<T> and &SubMatrix<T>
-///     (2) Matrix<T> and &SubMatrix<T>
-///     (3) &SubMatrix<T> and Matrix<T>
-///     (4) Matrix<T> and Matrix<T>
-///  are suppoerted
+// multiplication between
+//     (1) &SubMatrix<T> and &SubMatrix<T>
+//     (2) Matrix<T> and &SubMatrix<T>
+//     (3) &SubMatrix<T> and Matrix<T>
+//     (4) Matrix<T> and Matrix<T>
+//  are suppoerted
 
 impl<T: PID> ops::Mul<&SubMatrix<T>> for Matrix<T> {
     type Output = Matrix<T>;
@@ -432,7 +432,7 @@ impl<T: PID> ops::Mul<Matrix<T>> for Matrix<T> {
     }
 }
 
-/// Scalar multiplication, addition/subtraction of matrices consumes the ownership of Matrix<T>
+// Scalar multiplication, addition/subtraction of matrices consumes the ownership of Matrix<T>
 macro_rules! binary_op_impl {
     ($(($bin_op_tr: ident, $bin_op_fn: ident, $op_assign: tt)) *) => {$(
         impl<T: PID> ops::$bin_op_tr<&SubMatrix<T>> for Matrix<T> {
@@ -1504,6 +1504,40 @@ impl Matrix<f64> {
         }
 
         (spectrum, eigen_vectors)
+    }
+
+    pub fn spectrum_with_n_th_eigenvec_symmetric(self, n: usize) -> (f64, Matrix<f64>) {
+        assert_eq!( self.size().0, self.size().1,
+            "Input to this function must be a square matrix."
+        );
+        let size = self.size().0;
+
+        // initialize the eigenvectors
+        let mut eigen_vectors = Matrix::<f64>::new(size, 1);
+        let elem = 1.0 / (size as f64).sqrt();
+        for i in 0..size {
+            eigen_vectors[(i,0)] = elem;
+        }
+
+        // get the eigenvalues
+        let spectrum = self.clone().spectrum_symmetric();
+
+        // run the inverse iteration to get the eigenvector
+        let lambda = spectrum[(n,0)];
+
+        let mut m = self.clone();
+        for j in 0..size {
+            m[(j,j)] -= lambda;
+        }
+
+        let mut update = m.clone().solve( eigen_vectors[(.., 0)].as_matrix() );
+        update /= update.two_norm();
+        eigen_vectors[(.., 0)].write_and_move( update );
+        let mut update = m.solve( eigen_vectors[(.., 0)].as_matrix() );
+        update /= update.two_norm();
+        eigen_vectors[(.., 0)].write_and_move( update );
+
+        (lambda, eigen_vectors)
     }
 
     // pub fn extremal_spectrum_symmetric(self, n_eigen: usize, small: bool) -> (Matrix<f64>, Matrix<f64>) {

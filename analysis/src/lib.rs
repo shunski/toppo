@@ -1,10 +1,12 @@
+use core::panic;
+
 use alg::lin_alg::{Matrix, Vector, SparseMatrix};
 use alg::commutative::{PID, Zero, One};
 
 pub trait Function: PartialEq + Clone {
     type Domain;
     type Codomain;
-    fn eval(&self, x: Self::Domain) -> Self::Codomain ;
+    fn eval(&self, x: &Self::Domain) -> Self::Codomain ;
 }
 
 trait SmoothFn: Function
@@ -175,8 +177,8 @@ impl std::ops::DivAssign for AtomicSmoothFn {
 impl std::ops::Mul<f64> for AtomicSmoothFn {
     type Output = Self;
     fn mul(self, other: f64) -> Self {
-        if self == Self::Zero {
-            self
+        if self == Self::Zero || other == 0.0 {
+            Self::Zero
         } else if other == 1.0 {
             self
         } else if let Self::Sum( mut v ) = self {
@@ -250,7 +252,7 @@ impl Function for AtomicSmoothFn {
     type Domain = Matrix<f64>;
     type Codomain = f64;
 
-    fn eval(&self, x: Self::Domain) -> Self::Codomain {
+    fn eval(&self, x: &Self::Domain) -> Self::Codomain {
         match self {
             Self::Zero => 0.0,
             Self::One => 1.0,
@@ -258,8 +260,8 @@ impl Function for AtomicSmoothFn {
             Self::RealPower(f, a) => (f.eval(x)).powf(*a),
             Self::Sin(f) => (f.eval(x)).sin(),
             Self::Cos(f) => (f.eval(x)).cos(),
-            Self::Sum(v) => v.iter().map(|(a,f)| a * f.eval(x.clone()) ).sum(),
-            Self::Product(v) => v.iter().map(|(a, f)| f.eval(x.clone()).powi(*a) ).product()
+            Self::Sum(v) => v.iter().map(|(a,f)| a * f.eval(x) ).sum(),
+            Self::Product(v) => v.iter().map(|(a, f)| f.eval(x).powi(*a) ).product()
         }
     }
 }
@@ -388,10 +390,14 @@ impl std::fmt::Display for AtomicSmoothFn {
             Self::Sin(g) => write!(f, "sin({g})")?,
             Self::Cos(g) => write!(f, "cos({g})")?,
             Self::RealPower(g, a) => write!(f, "({g})^{a}")?,
-            Self::Sum(summands) => write!(f, "{summands}")?,
+            Self::Sum(summands) => write!(f, "({summands})")?,
             Self::Product(factors) => {
                 for (e, factor) in factors.iter() {
-                    write!(f, " {factor}^{e}")?
+                    if *e == 1 {
+                        write!(f, " {factor}")?
+                    } else {
+                        write!(f, " {factor}^{e}")?
+                    }
                 }
             }
         };
@@ -422,15 +428,22 @@ struct Var {}
 impl Function for Var {
     type Domain = f64;
     type Codomain = f64;
-    fn eval(&self, val:Self::Domain ) -> f64 {
-        val
+    fn eval(&self, val: &Self::Domain ) -> f64 {
+        *val
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MultiVarFn {
     fns: Vec<AtomicSmoothFn>,
     dim_domain: usize,
+}
+
+impl std::ops::Index<usize> for MultiVarFn {
+    type Output = AtomicSmoothFn; 
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.fns[index]
+    }
 }
 
 impl MultiVarFn {
@@ -440,12 +453,29 @@ impl MultiVarFn {
         }
     }
 
-    pub fn jacobian(self) -> Matrix<AtomicSmoothFn> {
+    pub fn jacobian(self) -> SparseMatrix<AtomicSmoothFn> {
         let n = self.fns.len();
-        let mut out = Matrix::zero(n, self.dim_domain);
+        let mut tmp = Vec::new();
+
+
         for (i, f) in self.fns.into_iter().enumerate() {
-            out[(i,..)].write(&f.jacobian(self.dim_domain));
+            let jacobian = f.jacobian(self.dim_domain);
+            for (j, x) in (0..self.dim_domain)
+                .filter(|&j| &jacobian[(0,j)] != &AtomicSmoothFn::Zero )
+                .map(|j| (j, jacobian[(0,j)].clone() ))
+            {
+                tmp.push(( (i,j), x ));
+            }
         }
+
+        let out = SparseMatrix::from((
+            (n, self.dim_domain), 
+            |idx: (usize, usize)| if let Ok(i) = tmp.binary_search_by_key( &&idx, |(i,_)| i ) {
+                Some( tmp[i].1.clone() )
+            } else {
+                None
+            }
+        ));
         out
     }
 }
@@ -454,10 +484,10 @@ impl Function for MultiVarFn {
     type Domain = Matrix<f64>;
     type Codomain = Matrix<f64>;
 
-    fn eval(&self, x: Self::Domain) -> Self::Codomain {
+    fn eval(&self, x: &Self::Domain) -> Self::Codomain {
         let mut out = Matrix::zero(self.fns.len(), 1);
         for (i, f) in self.fns.iter().enumerate() {
-            out[(i,0)] = f.eval(x.clone());
+            out[(i,0)] = f.eval(x);
         }
         out
     }
@@ -468,7 +498,7 @@ pub struct MultiVarFnBuilder {
 }
 
 impl MultiVarFnBuilder {
-    pub fn set(mut self, setter: impl Fn(usize, &mut AtomicSmoothFn, Vec<Coordinate>)) -> MultiVarFn {
+    pub fn set(mut self, mut setter: impl FnMut(usize, &mut AtomicSmoothFn, Vec<Coordinate>)) -> MultiVarFn {
         for (i, f) in self.handle.fns.iter_mut().enumerate() {
             setter(i, f, (0..self.handle.dim_domain).map(|c| Coordinate(c)).collect::<Vec<_>>())
         }
@@ -555,6 +585,16 @@ pub mod coordinate_impl {
     }
 }
 
+
+impl std::fmt::Display for MultiVarFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, g) in self.fns.iter().enumerate() {
+            write!(f, "f[{i}] = {g},\n")?;
+        }
+        write!(f, "")
+    }
+}
+
 #[cfg(test)]
 mod test {
     use alg::lin_alg::Matrix;
@@ -615,7 +655,7 @@ mod test {
             out
         };
 
-        assert!(j==j_ans, "j={} \nnot equals \nj_ans={}", &j, &j_ans);
+        assert!(j==j_ans, "j={:?} \nnot equals \nj_ans={:?}", &j, &j_ans);
     }
 }
 
@@ -623,11 +663,11 @@ mod test {
 impl Function for Matrix<AtomicSmoothFn> {
     type Codomain = Matrix<f64>;
     type Domain = Matrix<f64>;
-    fn eval(&self, other: Self::Domain) -> Self::Codomain {
+    fn eval(&self, other: &Self::Domain) -> Self::Codomain {
         let mut out = Matrix::zero(self.size().0, self.size().1);
         for i in 0..self.size().0 {
             for j in 0..self.size().1 {
-                out[(i,j)] = self[(i,j)].clone().eval(other.clone());
+                out[(i,j)] = self[(i,j)].clone().eval(&other);
             }
         }
         out
@@ -637,11 +677,11 @@ impl Function for Matrix<AtomicSmoothFn> {
 impl Function for SparseMatrix<AtomicSmoothFn> {
     type Codomain = SparseMatrix<f64>;
     type Domain = Matrix<f64>;
-    fn eval(&self, other: Self::Domain) -> Self::Codomain {
+    fn eval(&self, other: &Self::Domain) -> Self::Codomain {
         let mut out = Vec::new();
         for i in 0..self.size().0 {
             for (j, f) in self.row_iter(i) {
-                out.push(((i, j), f.eval(other.clone())));
+                out.push(((i, j), f.eval(&other)));
             }
         }
 

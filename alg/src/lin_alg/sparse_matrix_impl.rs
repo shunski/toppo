@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{rc::Rc, fmt::Display};
 use crate::lin_alg::Matrix;
 use super::{SparseNode, SparseMatrix};
 use crate::commutative::PID;
@@ -131,7 +131,7 @@ impl<T: PID> SparseMatrix<T> {
         }
     }
 
-    fn col_iter(&self, i: usize) -> Iter<'_, T> {
+    pub fn col_iter(&self, i: usize) -> Iter<'_, T> {
         let col = self.cols.binary_search_by(|f| f.start_node_idx().cmp(&i) );
         match col {
             Ok(x) => Iter {
@@ -278,6 +278,18 @@ impl<T: PID, S: PID> std::ops::Mul<SparseMatrix<T>> for Matrix<S>
         }
 
         (rhs.transpose() * self.transpose()).transpose()
+    }
+}
+
+
+impl<T: PID + Display> Display for SparseMatrix<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for i in 0..self.size().0 {
+            for (j, val) in self.row_iter(i) {
+                write!(f, "({i}, {j}): {val}\n")?;
+            }
+        }
+        write!(f, "")
     }
 }
 

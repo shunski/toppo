@@ -14,7 +14,7 @@ pub struct Matrix<T: PID> {
 
 pub struct SubMatrix<T: PID>([T]);
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct SparseMatrix<T: PID> {
     rows: Vec<SparseNode<T>>,
     cols: Vec<SparseNode<T>>,
@@ -22,7 +22,7 @@ pub struct SparseMatrix<T: PID> {
     transposed: bool,
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 enum SparseNode<T: PID> {
     Start(usize, Rc<SparseNode<T>>),
     End,
