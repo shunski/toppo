@@ -1,7 +1,7 @@
 use super::{ConstVector, ConstMatrix};
 use crate::commutative::{PID, Field};
 
-use std::ops::{
+use std::{iter::Sum, ops::{
     Deref,
     DerefMut,
     Add,
@@ -13,7 +13,7 @@ use std::ops::{
     MulAssign,
     Div,
     DivAssign,
-};
+}};
 
 impl<T: PID, const N: usize> Deref for ConstVector<T, N> {
     type Target = [T; N];
@@ -43,7 +43,7 @@ impl<T: PID, const N_ROW: usize, const N_COL: usize> DerefMut for ConstMatrix<T,
 
 
 // ToDo: implemenet the into_iter for the ConstVector types, and implement this trat for non-copiable 'T'.
-// ToDo: integrate the implimentations using macros
+// ToDo: integrate the implementations using macros
 impl <T: PID + Copy, const N: usize> Add for ConstVector<T, N> {
     type Output = Self;
     fn add(mut self, rhs: Self) -> Self::Output {
@@ -61,7 +61,7 @@ impl <T: PID + Copy, const N: usize> Sub for ConstVector<T, N> {
     }
 } 
 
-// ToDo: integrate the implimentations using macros
+// ToDo: integrate the implementations using macros
 impl <T: PID, const N: usize> Mul<T> for ConstVector<T, N> {
     type Output = Self;
     fn mul(mut self, rhs: T) -> Self::Output {
@@ -97,7 +97,7 @@ impl <T: Field, const N_ROW: usize, const N_COL: usize> Div<T> for ConstMatrix<T
 } 
 
 
-// ToDo: integrate the implimentations using macros
+// ToDo: integrate the implementations using macros
 impl <T: PID + Copy, const N: usize> AddAssign for ConstVector<T, N> {
     fn add_assign(&mut self, rhs: Self) {
         self.iter_mut()
@@ -140,7 +140,7 @@ impl<T: PID, const N: usize> Neg for ConstVector<T, N> {
     }
 }
 
-// ToDo: integrate the implimentations using macros
+// ToDo: integrate the implementations using macros
 impl <T: PID + Copy, const N_ROW: usize, const N_COL: usize> AddAssign for ConstMatrix<T, N_ROW, N_COL> {
     fn add_assign(&mut self, rhs: Self) {
         self.iter_mut()
@@ -202,9 +202,13 @@ impl<T: PID, const N: usize> From<[T; N]> for ConstVector<T, N> {
     }
 }
 
-impl <T: PID + Copy, const N: usize> ConstVector<T, N> {
+impl <T: PID + Copy + Sum<T>, const N: usize> ConstVector<T, N> {
     pub fn zero() -> Self {
         Self([T::zero(); N])
+    }
+    
+    pub fn dot(self, other: Self) -> T {
+        self.into_iter().zip(other.into_iter()).map(|(x,y)| x*y).sum::<T>()
     }
 } 
 

@@ -16,10 +16,12 @@ impl Sphere {
 
 
 #[derive(Clone, Copy, PartialEq)]
-pub struct Triangle([ConstVector<f64, 2>; 3]);
+pub struct Triangle {
+    data: [ConstVector<f64, 2>; 3]
+}
 
 impl Triangle {
-    fn circum_circle_contains(&self, p: ConstVector<f64, 2>) -> bool {
+    pub fn circum_circle_contains(&self, p: ConstVector<f64, 2>) -> bool {
         let orthogonal = |mut m: ConstVector<f64, 2>| {
             let tmp = m[0];
             m[0] = -m[1];
@@ -28,24 +30,36 @@ impl Triangle {
         };
         let inverse = |m: ConstMatrix<f64, 2, 2>| {
             let det = m[0][0] * m[1][1] - m[1][0] * m[0][1];
-            let inverse = ConstMatrix::from(
+            ConstMatrix::from(
                 [[ m[1][1], -m[0][1]],
-                 [-m[1][0],  m[0][0]]]
-            ) / det;
-            inverse
+                [-m[1][0],  m[0][0]]]
+            ) / det
         };
-        let a = self.0[0] + (self.0[1]-self.0[0]) / 2.0;
-        let b = orthogonal( self.0[1]-self.0[0] );
-        let c = self.0[0] + (self.0[2]-self.0[0]) / 2.0;
-        let d = orthogonal( self.0[2]-self.0[0] );
+        let a = self.data[0] + (self.data[1]-self.data[0]) / 2.0;
+        let b = orthogonal( self.data[1]-self.data[0] );
+        let c = self.data[0] + (self.data[2]-self.data[0]) / 2.0;
+        let d = orthogonal( self.data[2]-self.data[0] );
         
         let m = ConstMatrix::from([b, d*(-1.0)]);
-        let t = inverse(m)[0][0] * (c-a)[0] + inverse(m)[0][1] * (c-a)[1];
+        let m_inv = inverse(m);
+        let t = m_inv[0][0] * (c-a)[0] + m_inv[0][1] * (c-a)[1];
 
         let center = a + b*t;
-        let radius = (self.0[0] - center).two_norm();
+        let radius = (self.data[0] - center).two_norm();
 
         Sphere { radius, center }.contains(p)
+    }
+
+    pub fn new(data: [ConstVector<f64, 2>; 3]) -> Result<Self, ()> {
+        let v1 = data[1] - data[0];
+        let v1 = v1/v1.two_norm();
+        let v2 = data[2] - data[0];
+        let v2 = v2/v2.two_norm();
+        if v1.dot( v2 ).abs() == 1.0 {
+            Err(())
+        } else {
+            Ok(Self { data })
+        }
     }
 }
 
@@ -79,7 +93,7 @@ pub fn delaunay_triangulation(points: &[ConstVector<f64, 2>]) -> (Vec<Triangle>,
     for i in 0..points.len() {
         let mut bad_triangles = Vec::new();
         for &t in &triangulation {
-            let triangle = Triangle([index(t[0]), index(t[1]), index(t[2])]);
+            let triangle = Triangle::new([index(t[0]), index(t[1]), index(t[2])]);
             if triangle.circum_circle_contains(points[i]) {
                 bad_triangles.push( t );
             }
