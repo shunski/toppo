@@ -50,16 +50,8 @@ impl Triangle {
         Sphere { radius, center }.contains(p)
     }
 
-    pub fn new(data: [ConstVector<f64, 2>; 3]) -> Result<Self, ()> {
-        let v1 = data[1] - data[0];
-        let v1 = v1/v1.two_norm();
-        let v2 = data[2] - data[0];
-        let v2 = v2/v2.two_norm();
-        if v1.dot( v2 ).abs() == 1.0 {
-            Err(())
-        } else {
-            Ok(Self { data })
-        }
+    pub fn new(data: [ConstVector<f64, 2>; 3]) -> Self {
+        Self { data }
     }
 }
 
@@ -128,7 +120,7 @@ pub fn delaunay_triangulation(points: &[ConstVector<f64, 2>]) -> (Vec<Triangle>,
     let mut out = Vec::new();
     for t in triangulation.iter() {
         assert!(t[0]!=t[1] && t[0]!=t[2] && t[1]!=t[2] );
-        out.push( Triangle([points[t[0]], points[t[1]], points[t[2]]]) );
+        out.push( Triangle::new([points[t[0]], points[t[1]], points[t[2]]]) );
     }
 
     (out, triangulation)
@@ -149,7 +141,7 @@ mod geom_test {
             ConstVector::<f64, 2>::from( [2.0, 0.0] ),
             ConstVector::<f64, 2>::from( [0.1, 1.0] )
         ];
-        let triangle = Triangle([triangle[0], triangle[1], triangle[2]]);
+        let triangle = Triangle::new([triangle[0], triangle[1], triangle[2]]);
         assert!( triangle.circum_circle_contains( ConstVector::<f64, 2>::from( [1.0, 0.0]) ));
         assert!( triangle.circum_circle_contains( ConstVector::<f64, 2>::from( [0.5, 0.5]) ));
         assert!(!triangle.circum_circle_contains( ConstVector::<f64, 2>::from( [2.2, 0.0]) ));
@@ -188,7 +180,7 @@ mod geom_test {
 
         // draw edges
         for triangle in triangulation {
-            let mut triangle: Vec<_> = triangle.0.iter().map(|v| (v[0], v[1])).collect();
+            let mut triangle: Vec<_> = triangle.data.iter().map(|v| (v[0], v[1])).collect();
             triangle.push(triangle[0]);
             graphic.draw_series(LineSeries::new(
                 triangle.into_iter(),
