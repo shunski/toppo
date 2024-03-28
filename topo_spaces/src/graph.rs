@@ -311,18 +311,19 @@ impl RawSimpleGraph {
     }
 
     pub fn degree_of(&self, idx: usize) -> usize {
-        if idx >= self.n_vertices() { panic!(); };
+        if idx >= self.n_vertices() { panic!("idx out of bounds: graph has {} vertices but idx={}", self.n_vertices(), idx); };
+        self.adjacent_vertices_iter(idx).count()
+    }
 
-        (0..self.n_vertices())
-        .filter(|&j| j != idx )
-        .map(|j| {
-            if j < idx {
-                if self.contains(j, idx) { 1 } else { 0 }
-            } else {
-                if self.contains(idx, j) { 1 } else { 0 }
-            }
-        })
-        .sum()
+    pub fn degree_in_maximal_tree(&self, idx: usize) -> usize {
+        if idx >= self.n_vertices() { panic!("idx out of bounds: graph has {} vertices but idx={}", self.n_vertices(), idx); };
+        self.adjacent_vertices_iter(idx)
+            .filter(|&w| {
+                let mut e = [idx, w];
+                e.sort();
+                self.maximal_tree_contains(e) 
+            })
+            .count()
     }
 
     pub fn is_connected(&self) -> bool {
@@ -441,7 +442,7 @@ pub struct AdjacentVerticesIter<'a> {
 
 impl<'a> AdjacentVerticesIter<'a> {
     fn new(raw_graph: &'a RawSimpleGraph, vertex: usize) -> AdjacentVerticesIter<'a> {
-        AdjacentVerticesIter { raw_graph: raw_graph, curr: 0, vertex: vertex }
+        AdjacentVerticesIter { raw_graph, curr: 0, vertex }
     }
 }
 
@@ -1742,3 +1743,42 @@ impl<T: PID + Copy> WeightedSimpleGraph<T> {
         &self.data
     }
 }
+
+#[derive(PartialEq, Eq)]
+struct Path( Vec<usize> );
+
+impl PartialOrd for Path {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        // reverse the order to make the 'BinaryHeap<Path>' min heap.
+        other.0.len().partial_cmp( &self.0.len() )
+    }
+}
+
+impl Ord for Path {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
+// struct Tree {
+
+// }
+
+// pub fn dijkstra(graph: &RawSimpleGraph, (start, end): (usize, usize)) -> Vec<usize> {
+//     let mut out = Vec::new();
+    
+//     let mut priority_queue = BinaryHeap::from([vec![start]]);
+
+//     let mut curr = start;
+//     let mut prev = curr;
+//     while let Some(curr) = priority_queue.pop() {
+//         for v in graph.adjacent_vertices_iter(curr).filter(|&v| v != prev ) {
+//             priority_queue.push(vec, usize);
+//         }
+
+//         curr.start
+//     }
+
+//     out
+// }
+
